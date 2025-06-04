@@ -20,12 +20,9 @@ var (
 )
 
 func init() {
-	wd, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("failed to get working directory: %v\n", err)
-	} else {
-		fmt.Printf("Current working directory: %s\n", wd)
-	}
+       if _, err := os.Getwd(); err != nil {
+               logger.Warnf("failed to get working directory: %v", err)
+       }
 
 	// config 설정 TODO 추후 배포시에 설정해줘야 함.
 	cfgFile := os.Getenv("CONFIG_FILE")
