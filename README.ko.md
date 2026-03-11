@@ -3,7 +3,8 @@
 영문: [README.md](README.md) | 한글: [README.ko.md](README.ko.md)
 
 ## 현재 단계
-- 단계: **Phase 0 baseline stabilization**
+- 단계: **Track A / Phase A-1 Current Semantics Freeze 진행 중**
+- baseline 상태: **Phase 0 baseline은 실무 개발 기준으로 확보됨**
 - 현재 우선순위: **Track A (File/Data structuring)**
 
 ## 코어 baseline 범위

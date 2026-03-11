@@ -48,13 +48,14 @@
 - tori는 snapshot 기반 파일 구조화/카탈로그 엔진 방향은 맞다.
 - rule 기반 파일 그룹핑과 DataBlock/FileBlock 경로의 초기 구현이 존재한다.
 - 상위 개발 문서와 Track/Phase 기준선은 이미 존재한다.
-- 하지만 개발환경 baseline은 아직 약하다.
-- `go test ./...` 가 Green 상태가 아니다.
-- 코어 범위 기준 lint/toolchain baseline은 도입되었다.
-- CI 및 정책 게이트가 아직 없다.
-- README는 기술적 TODO 성격이 강하고 온보딩 기준 문서 역할이 약하다.
+- Phase 0 baseline은 실무 착수 기준으로 확보되었고, 현재는 Track A / Phase A-1 freeze를 진행 중이다.
+- `go test ./...` 는 여전히 `service` 보류 영역 때문에 Green이 아니다.
+- 코어 범위 기준 lint/toolchain baseline은 도입되었고 `.golangci.yml`이 저장소에 반영되어 있다.
+- GitHub Actions 기준선(`core-ci`, `security-observe`)이 존재한다.
+- README/README.ko 온보딩 문서가 정리되어 있고, 기존 원문은 legacy로 보관되어 있다.
+- 코어 baseline(`config`, `db`, `rules`, `block`, `cmd`)은 `make test-core`로 Green 상태를 유지한다.
 
-즉, 설계와 코어 로직은 출발 가능하지만, **지속 개발을 받쳐줄 최소 개발환경 baseline 확보가 선행되어야 한다.**
+즉, Phase 0의 최소 개발환경 baseline은 확보되었고, 현재는 이를 기반으로 Track A 본작업(Phase A-1 이후 단계)으로 진행 가능한 상태다.
 
 ---
 

@@ -3,7 +3,8 @@
 English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 
 ## Current Stage
-- Phase: **Phase 0 baseline stabilization**
+- Phase: **Track A / Phase A-1 Current Semantics Freeze (in progress)**
+- Baseline status: **Phase 0 baseline is established for practical development**
 - Immediate priority: **Track A (File/Data structuring)**
 
 ## Baseline Scope
