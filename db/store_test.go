@@ -9,19 +9,19 @@ import (
 	"testing/fstest"
 )
 
-func setupChangeFS() func() {
+func setupChangeFS(t *testing.T) {
+	t.Helper()
 	old := sqlFiles
 	sqlFiles = fstest.MapFS{
 		"queries/insert_file.sql":  &fstest.MapFile{Data: []byte("INSERT INTO files VALUES (?,?,?)")},
-		"queries/update_files.sql": &fstest.MapFile{Data: []byte("UPDATE files SET size=? WHERE id=?")},
-		"queries/delete_files.sql": &fstest.MapFile{Data: []byte("DELETE FROM files WHERE id=?")},
+		"queries/update_file.sql":  &fstest.MapFile{Data: []byte("UPDATE files SET size=? WHERE id=?")},
+		"queries/delete_file.sql":  &fstest.MapFile{Data: []byte("DELETE FROM files WHERE id=?")},
 	}
-	return func() { sqlFiles = old }
+	t.Cleanup(func() { sqlFiles = old })
 }
 
 func TestUpsertDelFile_Added(t *testing.T) {
-	restore := setupChangeFS()
-	defer restore()
+	setupChangeFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
@@ -38,8 +38,7 @@ func TestUpsertDelFile_Added(t *testing.T) {
 }
 
 func TestUpsertDelFile_Modified(t *testing.T) {
-	restore := setupChangeFS()
-	defer restore()
+	setupChangeFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
@@ -56,8 +55,7 @@ func TestUpsertDelFile_Modified(t *testing.T) {
 }
 
 func TestUpsertDelFile_Removed(t *testing.T) {
-	restore := setupChangeFS()
-	defer restore()
+	setupChangeFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
@@ -74,8 +72,7 @@ func TestUpsertDelFile_Removed(t *testing.T) {
 }
 
 func TestUpsertDelFile_Unknown(t *testing.T) {
-	restore := setupChangeFS()
-	defer restore()
+	setupChangeFS(t)
 	db, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
@@ -87,8 +84,7 @@ func TestUpsertDelFile_Unknown(t *testing.T) {
 }
 
 func TestUpsertDelFiles(t *testing.T) {
-	restore := setupChangeFS()
-	defer restore()
+	setupChangeFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)

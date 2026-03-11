@@ -164,12 +164,11 @@ func getFolderID(db *sql.DB, path string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("querySQLNoCtx failed (get_folder_id.sql): %w", err)
 	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			logger.Warnf("failed to close rows: %v", err)
+	defer func() {
+		if cErr := rows.Close(); cErr != nil {
+			logger.Warnf("failed to close rows: %v", cErr)
 		}
-	}(rows)
+	}()
 
 	if !rows.Next() {
 		return 0, sql.ErrNoRows

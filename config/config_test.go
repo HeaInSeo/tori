@@ -18,7 +18,7 @@ func writeTempConfig(t *testing.T, data string) string {
 }
 
 func TestLoadConfig(t *testing.T) {
-	cfgPath := writeTempConfig(t, `{"rootDir":"/tmp","exclusions":["*.txt"]}`)
+	cfgPath := writeTempConfig(t, `{"rootDir":"/tmp","filesExclusions":["*.txt"]}`)
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
@@ -43,7 +43,7 @@ func TestLoadConfig_DefaultExclusions(t *testing.T) {
 }
 
 func TestLoadConfig_MissingRootDir(t *testing.T) {
-	cfgPath := writeTempConfig(t, `{"exclusions":[]}`)
+	cfgPath := writeTempConfig(t, `{"filesExclusions":[]}`)
 	if _, err := LoadConfig(cfgPath); err == nil {
 		t.Errorf("expected error for missing rootDir")
 	}

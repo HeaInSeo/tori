@@ -80,7 +80,8 @@ func SetupInMemoryDB(t *testing.T) *sql.DB {
 			name TEXT NOT NULL,
 			size INTEGER NOT NULL,
 			created_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-			FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+			FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
+			UNIQUE(folder_id, name)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_files_folder_id ON files(folder_id);`,
 	}

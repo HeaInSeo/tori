@@ -1066,3 +1066,37 @@ K8s Pod/Job을 기준 런타임으로 보고, 싱글 머신은 그 의미를 따
 **Track A를 문서와 구현이 연결되는 수준까지 1차로 마무리하는 것**이다.
 
 이 문서는 그 작업의 상위 기준 문서로 계속 업데이트된다.
+
+---
+
+## 19. 구현 현황 스냅샷 (2026-03-11 기준)
+
+이 절은 문서 기준선과 실제 코드 상태를 연결하기 위한 as-is 기록이다.
+
+### 19.1 현재 동작 중인 범위
+
+- CLI 엔트리포인트는 `tori-admin` 기준으로 동작한다.
+- `snapshot` 명령은 현재 디렉터리 스냅샷을 DB에 저장한다.
+- `sync` 명령은 DB/실제 폴더 diff 후 변경 시 FileBlock 생성과 `datablock.pb` 생성을 수행한다.
+- `dump` 명령은 `datablock.pb`를 텍스트로 변환 저장한다.
+- Rule 해석은 `rule.json` 기반(`delimiter`, `rowRules.matchParts`, `columnRules.matchParts`)으로 파일명을 그룹화한다.
+- valid/invalid 분리와 CSV/invalid 파일 출력 경로가 구현되어 있다.
+
+### 19.2 아직 미구현 또는 임시 상태
+
+- `serve` 명령의 gRPC 서버 실행부는 주석 처리 상태로 실제 서버 기동을 하지 않는다.
+- `DataBlockServer`의 RPC 핸들러들(`SyncFolders`, `SaveFolders`, `GetDataBlock`)은 주석 처리 상태다.
+- 문서에서 제시한 Binding/Resolved Run Plan/Runtime 계층은 현재 저장소에서 본격 구현 전 단계다.
+- multi-role typed view 일반화는 아직 시작 전이며 pair-end 중심 semantics가 유지된다.
+
+### 19.3 문서-코드 갭(현재 인지)
+
+- 상위 문서의 3계층/Track 구조는 방향성 기준선이고, 코드 구현은 현재 Track A의 초기 as-is 보존에 집중되어 있다.
+- 일부 TODO가 코드 주석에 남아 있어 명명/경계(예: `SaveFolders`의 의미, 파라미터 정리) 고정 작업이 필요하다.
+- `header` 기반 표현과 실제 discovered column key 정렬 기반 CSV 출력 사이 의미 불일치 가능성이 남아 있다.
+
+### 19.4 다음 문서 업데이트 원칙
+
+- 이후 문서 갱신 시에는 반드시 "기준 날짜"를 절 제목에 남긴다.
+- 설계 결정(should)과 구현 현황(as-is)을 같은 문단에 섞지 않고 분리한다.
+- Track A 범위 변경 시 본 문서와 `fileblock_rule_resolution_spec_v0.1.md`를 동시에 갱신한다.

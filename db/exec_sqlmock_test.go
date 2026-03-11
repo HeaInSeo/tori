@@ -24,8 +24,13 @@ var testFS = fstest.MapFS{
 }
 
 // 각 테스트 시작 전에 sqlFiles 를 테스트용 파일 시스템으로 재정의
-func initTestFS() {
+func initTestFS(t *testing.T) {
+	t.Helper()
+	old := sqlFiles
 	sqlFiles = testFS
+	t.Cleanup(func() {
+		sqlFiles = old
+	})
 }
 
 // -------------------
@@ -33,7 +38,7 @@ func initTestFS() {
 // -------------------
 
 func TestExecSQLTx_FileNotFound(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -73,7 +78,7 @@ func TestExecSQLTx_FileNotFound(t *testing.T) {
 }
 
 func TestExecSQLTx_EmptyFile(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -112,7 +117,7 @@ func TestExecSQLTx_EmptyFile(t *testing.T) {
 }
 
 func TestExecSQLTx_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -164,7 +169,7 @@ func TestExecSQLTx_Success(t *testing.T) {
 }
 
 func TestExecSQLTx_QueryExecutionError(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -216,7 +221,7 @@ func TestExecSQLTx_QueryExecutionError(t *testing.T) {
 }
 
 func TestExecSQLTxNoCtx_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -269,7 +274,7 @@ func TestExecSQLTxNoCtx_Success(t *testing.T) {
 // -------------------
 
 func TestExecSQL_FileNotFound(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -293,7 +298,7 @@ func TestExecSQL_FileNotFound(t *testing.T) {
 }
 
 func TestExecSQL_EmptyFile(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -317,7 +322,7 @@ func TestExecSQL_EmptyFile(t *testing.T) {
 }
 
 func TestExecSQL_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -349,7 +354,7 @@ func TestExecSQL_Success(t *testing.T) {
 }
 
 func TestExecSQL_QueryExecutionError(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -386,7 +391,7 @@ func TestExecSQL_QueryExecutionError(t *testing.T) {
 }
 
 func TestExecSQLNoCtx_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -422,7 +427,7 @@ func TestExecSQLNoCtx_Success(t *testing.T) {
 // -------------------
 
 func TestQuerySQL_FileNotFound(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -446,7 +451,7 @@ func TestQuerySQL_FileNotFound(t *testing.T) {
 }
 
 func TestQuerySQL_EmptyFile(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -470,7 +475,7 @@ func TestQuerySQL_EmptyFile(t *testing.T) {
 }
 
 func TestQuerySQL_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -510,7 +515,7 @@ func TestQuerySQL_Success(t *testing.T) {
 }
 
 func TestQuerySQL_QueryError(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
@@ -547,7 +552,7 @@ func TestQuerySQL_QueryError(t *testing.T) {
 }
 
 func TestQuerySQLNoCtx_Success(t *testing.T) {
-	initTestFS()
+	initTestFS(t)
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("failed to open sqlmock database: %v", err)
