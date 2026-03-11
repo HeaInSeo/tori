@@ -127,3 +127,27 @@ func TestCurrentSemanticsFreeze_FixtureB_InvalidRow(t *testing.T) {
 		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
 	}
 }
+
+func TestCurrentSemanticsFreeze_FixtureC_TokenizationConsecutiveDelimiters(t *testing.T) {
+	fx := loadFreezeFixture(t, "fixture_c_tokenization_consecutive_delimiters.json")
+
+	grouped, err := GroupFiles(fx.Files, fx.RuleSet)
+	if err != nil {
+		t.Fatalf("GroupFiles error: %v", err)
+	}
+	valid, invalid := FilterGroups(grouped, len(fx.RuleSet.Header))
+
+	assertContiguousIndices(t, valid)
+
+	gotValid := signaturesFromIndexedRows(valid)
+	wantValid := signaturesFromRows(fx.Expected.Valid)
+	if strings.Join(gotValid, "\n") != strings.Join(wantValid, "\n") {
+		t.Fatalf("valid rows mismatch\nwant=%v\ngot=%v", wantValid, gotValid)
+	}
+
+	gotInvalid := signaturesFromRows(invalid)
+	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
+	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
+		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	}
+}
