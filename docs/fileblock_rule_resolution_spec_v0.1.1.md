@@ -244,6 +244,12 @@ invalid rows는 timestamp 이름의 텍스트 파일로 내보낼 수 있다.
 - Fixture D의 overwrite는 **현재 관찰 동작 기록**이며 final duplicate policy가 아니다.
 - Fixture E의 column ordering은 **현재 serialization 동작 기록**이며 final canonical column policy가 아니다.
 
+### 4.10 A-2 Duplicate Policy 설계 초안 연결
+
+- A-2 duplicate 정책 초안은 `docs/duplicate_policy_design_note_v0.1.md`를 기준으로 진행한다.
+- A-1 Fixture D는 regression anchor(현재 동작 기록)이며, A-2 정책 확정과 충돌하지 않는다.
+- 즉, current behavior 기록과 future policy contract는 분리해서 관리한다.
+
 ---
 
 ## 5. 문제 진단
