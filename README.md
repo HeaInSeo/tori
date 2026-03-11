@@ -3,8 +3,9 @@
 English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 
 ## Current Stage
-- Phase: **Track A / Phase A-1 Current Semantics Freeze (in progress)**
+- Phase: **Track A / Phase A-2 Duplicate Policy Design (in progress)**
 - Baseline status: **Phase 0 baseline is established for practical development**
+- A-1 status: **Phase A-1 first freeze is completed (A/B/C/D/E)**
 - Immediate priority: **Track A (File/Data structuring)**
 
 ## Baseline Scope

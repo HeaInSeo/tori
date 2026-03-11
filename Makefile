@@ -44,8 +44,20 @@ golangci-lint:
 		VER="$${VER#v}"; \
 		FILE="golangci-lint-$$VER-$$OS-$$ARCH.tar.gz"; \
 		URL="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)/$$FILE"; \
+		SUM_URL="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)/checksums.txt"; \
 		TMP="$$(mktemp -d)"; \
 		curl -fsSL "$$URL" -o "$$TMP/lint.tgz"; \
+		curl -fsSL "$$SUM_URL" -o "$$TMP/checksums.txt"; \
+		EXPECTED="$$(awk -v f="$$FILE" '$$2==f{print $$1}' "$$TMP/checksums.txt")"; \
+		if [ -z "$$EXPECTED" ]; then echo "checksum not found for $$FILE"; exit 1; fi; \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			ACTUAL="$$(sha256sum "$$TMP/lint.tgz" | awk '{print $$1}')"; \
+		elif command -v shasum >/dev/null 2>&1; then \
+			ACTUAL="$$(shasum -a 256 "$$TMP/lint.tgz" | awk '{print $$1}')"; \
+		else \
+			echo "no sha256 tool found (sha256sum/shasum)"; exit 1; \
+		fi; \
+		if [ "$$EXPECTED" != "$$ACTUAL" ]; then echo "checksum mismatch for $$FILE"; exit 1; fi; \
 		tar -xzf "$$TMP/lint.tgz" -C "$$TMP"; \
 		cp "$$TMP/golangci-lint-$$VER-$$OS-$$ARCH/golangci-lint" "$(GOLANGCI_LINT)"; \
 		chmod +x "$(GOLANGCI_LINT)"; \
