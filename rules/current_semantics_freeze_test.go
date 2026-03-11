@@ -1,0 +1,129 @@
+package rules
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+type freezeExpected struct {
+	Valid   []map[string]string `json:"valid"`
+	Invalid []map[string]string `json:"invalid"`
+}
+
+type freezeFixture struct {
+	Name     string         `json:"name"`
+	RuleSet  RuleSet        `json:"ruleSet"`
+	Files    []string       `json:"files"`
+	Expected freezeExpected `json:"expected"`
+}
+
+func loadFreezeFixture(t *testing.T, fileName string) freezeFixture {
+	t.Helper()
+	path := filepath.Join("testdata", "phase_a1", fileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read fixture %s: %v", path, err)
+	}
+	var fx freezeFixture
+	if err := json.Unmarshal(data, &fx); err != nil {
+		t.Fatalf("failed to unmarshal fixture %s: %v", path, err)
+	}
+	return fx
+}
+
+func rowSignature(row map[string]string) string {
+	keys := make([]string, 0, len(row))
+	for k := range row {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+row[k])
+	}
+	return strings.Join(parts, "|")
+}
+
+func signaturesFromIndexedRows(rows map[int]map[string]string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, rowSignature(row))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func signaturesFromRows(rows []map[string]string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, rowSignature(row))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func assertContiguousIndices(t *testing.T, rows map[int]map[string]string) {
+	t.Helper()
+	keys := make([]int, 0, len(rows))
+	for k := range rows {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	for i, k := range keys {
+		if i != k {
+			t.Fatalf("valid row indices are not contiguous: got %v", keys)
+		}
+	}
+}
+
+func TestCurrentSemanticsFreeze_FixtureA_NormalPairEnd(t *testing.T) {
+	fx := loadFreezeFixture(t, "fixture_a_normal_pair_end.json")
+
+	grouped, err := GroupFiles(fx.Files, fx.RuleSet)
+	if err != nil {
+		t.Fatalf("GroupFiles error: %v", err)
+	}
+	valid, invalid := FilterGroups(grouped, len(fx.RuleSet.Header))
+
+	assertContiguousIndices(t, valid)
+
+	gotValid := signaturesFromIndexedRows(valid)
+	wantValid := signaturesFromRows(fx.Expected.Valid)
+	if strings.Join(gotValid, "\n") != strings.Join(wantValid, "\n") {
+		t.Fatalf("valid rows mismatch\nwant=%v\ngot=%v", wantValid, gotValid)
+	}
+
+	gotInvalid := signaturesFromRows(invalid)
+	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
+	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
+		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	}
+}
+
+func TestCurrentSemanticsFreeze_FixtureB_InvalidRow(t *testing.T) {
+	fx := loadFreezeFixture(t, "fixture_b_invalid_row.json")
+
+	grouped, err := GroupFiles(fx.Files, fx.RuleSet)
+	if err != nil {
+		t.Fatalf("GroupFiles error: %v", err)
+	}
+	valid, invalid := FilterGroups(grouped, len(fx.RuleSet.Header))
+
+	assertContiguousIndices(t, valid)
+
+	gotValid := signaturesFromIndexedRows(valid)
+	wantValid := signaturesFromRows(fx.Expected.Valid)
+	if strings.Join(gotValid, "\n") != strings.Join(wantValid, "\n") {
+		t.Fatalf("valid rows mismatch\nwant=%v\ngot=%v", wantValid, gotValid)
+	}
+
+	gotInvalid := signaturesFromRows(invalid)
+	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
+	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
+		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	}
+}
