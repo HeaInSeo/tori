@@ -1,4 +1,5 @@
-# Phase A-1 Current Semantics Freeze 작업 문서 v0.1
+# Phase A-1 Current Semantics Freeze 작업 문서 v0.1.1
+### 문서 버전: v0.1.1 (2026-03-11, 소규모 업데이트/patch)
 
 ## 1. 문서 목적
 
@@ -10,7 +11,7 @@
 - 이후 multi-role generalization, schema validator, row identity 분리 같은 구조 변경 전에 **현재 동작을 기준선**으로 남긴다.
 - 추후 리팩터링/일반화 시 회귀를 판정할 수 있는 fixture, snapshot test, 샘플 데이터, 보고 형식을 마련한다.
 
-이 문서는 **구현 단계 문서**이지만, 설계 기준선을 어기지 않기 위해 현재 살아 있는 기술문서와 `FileBlock Rule Resolution Specification v0.1`의 범위를 따른다.
+이 문서는 **구현 단계 문서**이지만, 설계 기준선을 어기지 않기 위해 현재 살아 있는 기술문서와 `FileBlock Rule Resolution Specification v0.1.1`의 범위를 따른다.
 
 ---
 

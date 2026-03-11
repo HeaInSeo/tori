@@ -1,6 +1,7 @@
-# tori FileBlock Rule Resolution Specification v0.1
+# tori FileBlock Rule Resolution Specification v0.1.1
 ## 부제: Track A / File-Data 구조화 계층의 첫 상세 설계 문서
 ### 상태: 상세 설계 초안 (개발 전 기준선)
+### 문서 버전: v0.1.1 (2026-03-11, 소규모 업데이트/patch)
 ### 상위 문서: tori 설계 정리 초안 v0.2 / 개발 프로그램 계획
 ### 목적: source snapshot으로부터 canonical FileBlock / Row 후보를 생성하는 rule resolution 계층의 의미론, 책임 경계, 단계적 개발 기준을 고정한다.
 
