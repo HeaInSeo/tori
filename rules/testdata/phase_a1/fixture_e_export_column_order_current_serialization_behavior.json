@@ -1,0 +1,19 @@
+{
+  "name": "fixture-e-export-column-order-current-serialization-behavior",
+  "headers": ["R2", "R1"],
+  "resultMap": {
+    "0": {
+      "R1": "row0-r1.fastq.gz",
+      "R2": "row0-r2.fastq.gz"
+    },
+    "1": {
+      "R1": "row1-r1.fastq.gz",
+      "R2": "row1-r2.fastq.gz"
+    }
+  },
+  "expectedCsvLines": [
+    "Row,R2,R1",
+    "Row0,row0-r1.fastq.gz,row0-r2.fastq.gz",
+    "Row1,row1-r1.fastq.gz,row1-r2.fastq.gz"
+  ]
+}

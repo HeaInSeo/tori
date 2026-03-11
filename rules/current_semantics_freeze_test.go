@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +22,13 @@ type freezeFixture struct {
 	Expected freezeExpected `json:"expected"`
 }
 
+type exportFreezeFixture struct {
+	Name             string                       `json:"name"`
+	Headers          []string                     `json:"headers"`
+	ResultMap        map[string]map[string]string `json:"resultMap"`
+	ExpectedCSVLines []string                     `json:"expectedCsvLines"`
+}
+
 func loadFreezeFixture(t *testing.T, fileName string) freezeFixture {
 	t.Helper()
 	path := filepath.Join("testdata", "phase_a1", fileName)
@@ -33,6 +41,33 @@ func loadFreezeFixture(t *testing.T, fileName string) freezeFixture {
 		t.Fatalf("failed to unmarshal fixture %s: %v", path, err)
 	}
 	return fx
+}
+
+func loadExportFreezeFixture(t *testing.T, fileName string) exportFreezeFixture {
+	t.Helper()
+	path := filepath.Join("testdata", "phase_a1", fileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read fixture %s: %v", path, err)
+	}
+	var fx exportFreezeFixture
+	if err := json.Unmarshal(data, &fx); err != nil {
+		t.Fatalf("failed to unmarshal fixture %s: %v", path, err)
+	}
+	return fx
+}
+
+func toIndexedRows(t *testing.T, in map[string]map[string]string) map[int]map[string]string {
+	t.Helper()
+	out := make(map[int]map[string]string, len(in))
+	for k, v := range in {
+		idx, err := strconv.Atoi(k)
+		if err != nil {
+			t.Fatalf("invalid row index key %q: %v", k, err)
+		}
+		out[idx] = v
+	}
+	return out
 }
 
 func rowSignature(row map[string]string) string {
@@ -175,5 +210,28 @@ func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *te
 	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
 	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
 		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	}
+}
+
+// This test records serialization/output behavior only (not grouping semantics).
+// It does not assert the final intended column ordering policy.
+func TestCurrentSemanticsFreeze_FixtureE_ExportColumnOrderCurrentSerializationBehavior(t *testing.T) {
+	fx := loadExportFreezeFixture(t, "fixture_e_export_column_order_current_serialization_behavior.json")
+	resultMap := toIndexedRows(t, fx.ResultMap)
+
+	outputDir := t.TempDir()
+	if err := ExportResultsCSV(resultMap, fx.Headers, outputDir); err != nil {
+		t.Fatalf("ExportResultsCSV error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "fileblock.csv"))
+	if err != nil {
+		t.Fatalf("failed to read fileblock.csv: %v", err)
+	}
+
+	gotLines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	wantLines := fx.ExpectedCSVLines
+	if strings.Join(gotLines, "\n") != strings.Join(wantLines, "\n") {
+		t.Fatalf("csv lines mismatch\nwant=%v\ngot=%v", wantLines, gotLines)
 	}
 }
