@@ -25,7 +25,3 @@ qodana.yaml
 
 # lint
 lint_results.json
-
-# local agent notes
-AGENTS.md
-agnet.md
