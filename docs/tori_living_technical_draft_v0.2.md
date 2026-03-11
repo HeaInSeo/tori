@@ -1099,4 +1099,4 @@ K8s Pod/Job을 기준 런타임으로 보고, 싱글 머신은 그 의미를 따
 
 - 이후 문서 갱신 시에는 반드시 "기준 날짜"를 절 제목에 남긴다.
 - 설계 결정(should)과 구현 현황(as-is)을 같은 문단에 섞지 않고 분리한다.
-- Track A 범위 변경 시 본 문서와 `fileblock_rule_resolution_spec_v0.1.md`를 동시에 갱신한다.
+- Track A 범위 변경 시 본 문서와 `fileblock_rule_resolution_spec_v0.1.1.md`를 동시에 갱신한다.

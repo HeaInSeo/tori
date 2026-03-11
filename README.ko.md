@@ -21,8 +21,8 @@
 
 ## 설계 문서
 - [`docs/tori_living_technical_draft_v0.2.md`](docs/tori_living_technical_draft_v0.2.md)
-- [`docs/fileblock_rule_resolution_spec_v0.1.md`](docs/fileblock_rule_resolution_spec_v0.1.md)
-- [`docs/phase_a1_current_semantics_freeze_workplan_v0.1.md`](docs/phase_a1_current_semantics_freeze_workplan_v0.1.md)
+- [`docs/fileblock_rule_resolution_spec_v0.1.1.md`](docs/fileblock_rule_resolution_spec_v0.1.1.md)
+- [`docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md`](docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md)
 - [`docs/tori_phase0_environment_setup_checklist_v0.1.md`](docs/tori_phase0_environment_setup_checklist_v0.1.md)
 
 ## 보류 영역(명시)
