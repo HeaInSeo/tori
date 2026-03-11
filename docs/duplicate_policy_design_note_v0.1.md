@@ -1,6 +1,7 @@
 # Track A / A-2 Duplicate Policy Design Note v0.1
 ### 상태: 설계 초안 (구현 전)
 ### 기준선: A-1 current semantics freeze 완료 이후
+### 관련 계약 문서: `docs/duplicate_policy_contract_v0.1.md`
 
 ## 1) 현재 duplicate current behavior 요약
 
