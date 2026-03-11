@@ -26,3 +26,7 @@ qodana.yaml
 # lint
 .golangci.yml
 lint_results.json
+
+# local agent notes
+AGENTS.md
+agnet.md
