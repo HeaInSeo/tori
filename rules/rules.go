@@ -40,6 +40,23 @@ type SizeRules struct {
 	MaxSize int `json:"maxSize"`
 }
 
+type DuplicateReportEntry struct {
+	ReasonCode      string
+	RowKey          string
+	RoleKey         string
+	Candidates      []string
+	SourceFileNames []string
+	Diagnostic      string
+}
+
+type DuplicateCollisionError struct {
+	Entries []DuplicateReportEntry
+}
+
+func (e *DuplicateCollisionError) Error() string {
+	return fmt.Sprintf("duplicate collision detected: %d entrie(s)", len(e.Entries))
+}
+
 // ----------------------------------------------------------------------
 
 // LoadRuleSetFromFile JSON 파일에서 RuleSet 을 읽어옴
@@ -94,6 +111,12 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 	rowMap := make(map[string]int) // rowKey → rowIndex
 	nextRowIdx := 0
 	result := make(map[int]map[string]string) // 최종 결과
+	type duplicateKey struct {
+		rowKey  string
+		roleKey string
+	}
+	duplicateMap := make(map[duplicateKey]*DuplicateReportEntry)
+	duplicateOrder := make([]duplicateKey, 0)
 
 	for _, fn := range fileNames {
 		parts := splitFileName(fn, ruleSet.Delimiter)
@@ -124,10 +147,48 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 		colKey := strings.Join(colKeyParts, "_")
 
 		// 3) 결과에 추가
+		if existing, exists := result[rowIdx][colKey]; exists && existing != fn {
+			key := duplicateKey{rowKey: rowKey, roleKey: colKey}
+			entry, found := duplicateMap[key]
+			if !found {
+				entry = &DuplicateReportEntry{
+					ReasonCode: "duplicate_role_in_row",
+					RowKey:     rowKey,
+					RoleKey:    colKey,
+				}
+				duplicateMap[key] = entry
+				duplicateOrder = append(duplicateOrder, key)
+			}
+			entry.Candidates = appendUniqueString(entry.Candidates, existing)
+			entry.Candidates = appendUniqueString(entry.Candidates, fn)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, existing)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, fn)
+			continue
+		}
 		result[rowIdx][colKey] = fn
 	}
 
+	if len(duplicateOrder) > 0 {
+		entries := make([]DuplicateReportEntry, 0, len(duplicateOrder))
+		for _, key := range duplicateOrder {
+			entry := duplicateMap[key]
+			sort.Strings(entry.Candidates)
+			sort.Strings(entry.SourceFileNames)
+			entries = append(entries, *entry)
+		}
+		return nil, &DuplicateCollisionError{Entries: entries}
+	}
+
 	return result, nil
+}
+
+func appendUniqueString(items []string, value string) []string {
+	for _, existing := range items {
+		if existing == value {
+			return items
+		}
+	}
+	return append(items, value)
 }
 
 // FilterMap 각 Row에 컬럼 수가 expectedColCount와 같은 행만 valid, 나머지는 invalid로 분리

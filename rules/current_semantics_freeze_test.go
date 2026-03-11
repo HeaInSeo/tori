@@ -190,6 +190,8 @@ func TestCurrentSemanticsFreeze_FixtureC_TokenizationConsecutiveDelimiters(t *te
 // This test records known as-is overwrite behavior for duplicate collisions.
 // It does not assert the final intended duplicate handling policy.
 func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *testing.T) {
+	t.Skip("historical A-1 anchor: overwrite behavior was recorded before A-2 duplicate error policy")
+
 	fx := loadFreezeFixture(t, "fixture_d_duplicate_collision_current_behavior.json")
 
 	grouped, err := GroupFiles(fx.Files, fx.RuleSet)

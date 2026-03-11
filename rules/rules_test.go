@@ -1,10 +1,12 @@
 package rules
 
 import (
+	"errors"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -38,6 +40,108 @@ func TestGroupFilesAndFilterGroups(t *testing.T) {
 	}
 	if len(invalid) != 1 {
 		t.Errorf("expected 1 invalid group, got %d", len(invalid))
+	}
+}
+
+func TestGroupFiles_DuplicateCollisionReturnsTypedError(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+		"sample1_S1_L001_R2_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	got, err := GroupFiles(files, rs)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error, got nil")
+	}
+	if got != nil {
+		t.Fatalf("expected nil grouped result on duplicate collision, got: %v", got)
+	}
+
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+}
+
+func TestGroupFiles_DuplicateCollisionErrorEntryFields(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	_, err := GroupFiles(files, rs)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error, got nil")
+	}
+
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+	if len(dupErr.Entries) != 1 {
+		t.Fatalf("expected 1 duplicate entry, got %d", len(dupErr.Entries))
+	}
+
+	entry := dupErr.Entries[0]
+	if entry.ReasonCode != "duplicate_role_in_row" {
+		t.Fatalf("unexpected reason code: %s", entry.ReasonCode)
+	}
+	if entry.RowKey == "" {
+		t.Fatalf("row key should not be empty")
+	}
+	if entry.RoleKey != "R1" {
+		t.Fatalf("unexpected role key: %s", entry.RoleKey)
+	}
+
+	gotCandidates := append([]string(nil), entry.Candidates...)
+	sort.Strings(gotCandidates)
+	wantCandidates := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+	}
+	sort.Strings(wantCandidates)
+	if !reflect.DeepEqual(gotCandidates, wantCandidates) {
+		t.Fatalf("unexpected candidates: got=%v want=%v", gotCandidates, wantCandidates)
+	}
+
+	gotSource := append([]string(nil), entry.SourceFileNames...)
+	sort.Strings(gotSource)
+	if !reflect.DeepEqual(gotSource, wantCandidates) {
+		t.Fatalf("unexpected source file names: got=%v want=%v", gotSource, wantCandidates)
+	}
+}
+
+func TestGroupFiles_NoDuplicateKeepsNormalBehavior(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1_S1_L001_R2_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	grouped, err := GroupFiles(files, rs)
+	if err != nil {
+		t.Fatalf("unexpected GroupFiles error: %v", err)
+	}
+	if len(grouped) != 1 {
+		t.Fatalf("expected 1 grouped row, got %d", len(grouped))
+	}
+	if grouped[0]["R1"] == "" || grouped[0]["R2"] == "" {
+		t.Fatalf("expected both R1 and R2 in grouped row: %v", grouped[0])
 	}
 }
 
