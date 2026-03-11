@@ -210,6 +210,19 @@
 - `headers`와 실제 discovered key 정렬의 차이 확인
 - row 순서/column 순서를 고정
 
+### 7.1.1 현재 진행 상태 (Phase A-1 1차, 2026-03-11 기준)
+
+- [x] Fixture Set A 추가/검증 완료 (정상 pair-end)
+- [x] Fixture Set B 추가/검증 완료 (invalid row)
+- [x] Fixture Set C 추가/검증 완료 (연속 delimiter tokenization 경계)
+- [x] Fixture Set D 추가/검증 완료 (duplicate collision overwrite current behavior 기록)
+- [x] Fixture Set E 추가/검증 완료 (ExportResultsCSV current serialization ordering 기록)
+
+주의:
+- Set D는 final duplicate policy를 확정한 것이 아니다.
+- Set E는 final canonical column policy를 확정한 것이 아니다.
+- 두 항목은 모두 known as-is behavior freeze 범위다.
+
 ### 7.2 작업 2 — snapshot/table-driven test 작성
 
 최소 아래 테스트 범주를 포함한다.
@@ -319,6 +332,19 @@ rules/
 ### 9.2 보너스 종료 조건
 
 - 현재 fixture를 바탕으로 Phase A-2 generalization을 위한 샘플 multi-role 예시(구현 없이 문서만)까지 남기면 좋다.
+
+### 9.3 종료 평가 (Phase A-1 1차)
+
+- 판정: **Phase A-1 1차 완료**
+- 근거:
+1. A/B/C/D/E fixture+freeze test가 모두 추가되어 현재 의미론의 핵심 경계가 고정되었다.
+2. duplicate collision / export ordering에 대해 current behavior와 final policy를 분리해 기록했다.
+3. 의미론 변경 없이 테스트/fixture 중심으로 기준선을 확보했다.
+
+- 아직 열린 항목(Phase A-2 입력):
+1. duplicate collision final policy 정의
+2. multi-role schema generalization
+3. canonical column policy(헤더/role/serialization 일관성) 정의
 
 ---
 

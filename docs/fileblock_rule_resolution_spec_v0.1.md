@@ -228,6 +228,21 @@ invalid rows는 timestamp 이름의 텍스트 파일로 내보낼 수 있다.
 5. invalid 산출물이 구조화되어 있지 않다.
 6. materialized 결과와 identity 개념이 아직 약하다.
 
+### 4.9 Current Semantics Freeze (Phase A-1 1차) 고정 범위
+
+아래 항목은 `rules/testdata/phase_a1` fixture와 `rules/current_semantics_freeze_test.go`로 고정된
+**known as-is behavior**다.
+
+1. Fixture A (정상 pair-end): `R1/R2` 완전 row가 valid로 분류된다.
+2. Fixture B (invalid row): `R2` 누락 row가 invalid로 분류된다.
+3. Fixture C (tokenization 경계): 연속 delimiter(`__`, `..`)가 있어도 `strings.Fields()` 정규화로 토큰화되어 grouping이 유지된다.
+4. Fixture D (duplicate collision): 동일 row/column key 충돌 시 나중 입력이 남는 overwrite 동작이 관찰된다.
+5. Fixture E (export ordering): CSV header는 `Row + headers`를 사용하지만, 데이터 컬럼 채움 순서는 discovered key 집합 정렬(`sort.Strings`) 기준이다.
+
+중요:
+- Fixture D의 overwrite는 **현재 관찰 동작 기록**이며 final duplicate policy가 아니다.
+- Fixture E의 column ordering은 **현재 serialization 동작 기록**이며 final canonical column policy가 아니다.
+
 ---
 
 ## 5. 문제 진단
@@ -1033,4 +1048,3 @@ reason code 중심으로 설계하는 것이 바람직하다.
 
 즉 Track A의 첫 상세 설계 목표는,
 현재 구현을 부정하는 것이 아니라 **현재 구현의 의미를 고정한 뒤, 더 넓은 일반화 방향으로 안전하게 승격시키는 것**이다.
-
