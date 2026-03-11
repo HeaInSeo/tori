@@ -1,0 +1,32 @@
+{
+  "name": "fixture-d-duplicate-collision-current-behavior",
+  "ruleSet": {
+    "version": "1.0.1",
+    "delimiter": ["_", "."],
+    "header": ["R1", "R2"],
+    "rowRules": {
+      "matchParts": [0, 1, 2, 4, 5, 6]
+    },
+    "columnRules": {
+      "matchParts": [3]
+    },
+    "sizeRules": {
+      "minSize": 100,
+      "maxSize": 1048576
+    }
+  },
+  "files": [
+    "sample5_S5_L001_R1_001.fastq.gz",
+    "sample5__S5_L001_R1_001.fastq.gz",
+    "sample5_S5_L001_R2_001.fastq.gz"
+  ],
+  "expected": {
+    "valid": [
+      {
+        "R1": "sample5__S5_L001_R1_001.fastq.gz",
+        "R2": "sample5_S5_L001_R2_001.fastq.gz"
+      }
+    ],
+    "invalid": []
+  }
+}

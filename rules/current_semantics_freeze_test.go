@@ -151,3 +151,29 @@ func TestCurrentSemanticsFreeze_FixtureC_TokenizationConsecutiveDelimiters(t *te
 		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
 	}
 }
+
+// This test records known as-is overwrite behavior for duplicate collisions.
+// It does not assert the final intended duplicate handling policy.
+func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *testing.T) {
+	fx := loadFreezeFixture(t, "fixture_d_duplicate_collision_current_behavior.json")
+
+	grouped, err := GroupFiles(fx.Files, fx.RuleSet)
+	if err != nil {
+		t.Fatalf("GroupFiles error: %v", err)
+	}
+	valid, invalid := FilterGroups(grouped, len(fx.RuleSet.Header))
+
+	assertContiguousIndices(t, valid)
+
+	gotValid := signaturesFromIndexedRows(valid)
+	wantValid := signaturesFromRows(fx.Expected.Valid)
+	if strings.Join(gotValid, "\n") != strings.Join(wantValid, "\n") {
+		t.Fatalf("valid rows mismatch\nwant=%v\ngot=%v", wantValid, gotValid)
+	}
+
+	gotInvalid := signaturesFromRows(invalid)
+	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
+	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
+		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	}
+}
