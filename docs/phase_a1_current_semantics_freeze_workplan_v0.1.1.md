@@ -225,6 +225,8 @@
 - duplicate entry v0.1 의미는 `TestGroupFiles_DuplicateCollisionEntryV01SemanticLock`로 고정 완료
 - multi-collision 의미는 `TestGroupFiles_DuplicateCollisionMultipleEntriesV01SemanticLock` 추가로 보강되었고, duplicate 2건 이상 케이스의 `Entries` 수집 의미를 테스트로 고정 완료
 - 이 잠금은 `RoleKey` / `ReasonCode` / `Candidates` 의미에 한정되며, `Entries` 순서 / `Candidates` 원래 순서 / 새로운 정렬 규칙은 contract로 승격하지 않음
+- `TestGenerateFileBlock_PreservesDuplicateCollisionTypedError` 추가로 `GenerateFileBlock` 경로에서도 `errors.As(..., *rules.DuplicateCollisionError)`가 유지됨을 확인
+- 즉 duplicate v0.1 최소 contract는 상위 error surface에서도 훼손되지 않음을 현재 기준선으로 확인했다
 - multi-role 일반화 / canonical column policy / service-runtime 영역은 계속 보류
 
 주의:
