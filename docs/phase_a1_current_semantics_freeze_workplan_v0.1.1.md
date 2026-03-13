@@ -219,6 +219,14 @@
 - [x] Fixture Set D 추가/검증 완료 (duplicate collision overwrite current behavior 기록)
 - [x] Fixture Set E 추가/검증 완료 (ExportResultsCSV current serialization ordering 기록)
 
+최근 상태 메모 (2026-03-13 기준):
+- duplicate collision handling은 `DuplicateCollisionError` 기반 최소 contract로 구현 완료
+- `core-ci` baseline은 Makefile lint bootstrap 복구 후 green 상태 유지
+- duplicate entry v0.1 의미는 `TestGroupFiles_DuplicateCollisionEntryV01SemanticLock`로 고정 완료
+- multi-collision 의미는 `TestGroupFiles_DuplicateCollisionMultipleEntriesV01SemanticLock` 추가로 보강되었고, duplicate 2건 이상 케이스의 `Entries` 수집 의미를 테스트로 고정 완료
+- 이 잠금은 `RoleKey` / `ReasonCode` / `Candidates` 의미에 한정되며, `Entries` 순서 / `Candidates` 원래 순서 / 새로운 정렬 규칙은 contract로 승격하지 않음
+- multi-role 일반화 / canonical column policy / service-runtime 영역은 계속 보류
+
 주의:
 - Set D는 final duplicate policy를 확정한 것이 아니다.
 - Set E는 final canonical column policy를 확정한 것이 아니다.
