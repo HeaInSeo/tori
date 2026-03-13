@@ -44,7 +44,7 @@ golangci-lint:
 		VER="$${VER#v}"; \
 		FILE="golangci-lint-$$VER-$$OS-$$ARCH.tar.gz"; \
 		URL="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)/$$FILE"; \
-		SUM_URL="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)/checksums.txt"; \
+		SUM_URL="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)/golangci-lint-$$VER-checksums.txt"; \
 		TMP="$$(mktemp -d)"; \
 		curl -fsSL "$$URL" -o "$$TMP/lint.tgz"; \
 		curl -fsSL "$$SUM_URL" -o "$$TMP/checksums.txt"; \
