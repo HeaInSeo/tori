@@ -122,6 +122,108 @@ func TestGroupFiles_DuplicateCollisionErrorEntryFields(t *testing.T) {
 	}
 }
 
+func TestGroupFiles_DuplicateCollisionEntryV01SemanticLock(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	_, err := GroupFiles(files, rs)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error, got nil")
+	}
+
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+	if len(dupErr.Entries) == 0 {
+		t.Fatalf("expected non-empty duplicate entries")
+	}
+
+	entry := dupErr.Entries[0]
+	if entry.RoleKey != "R1" {
+		t.Fatalf("expected RoleKey to reflect current column key semantics, got %q", entry.RoleKey)
+	}
+	if !reflect.DeepEqual(entry.Candidates, entry.SourceFileNames) {
+		t.Fatalf("expected Candidates and SourceFileNames to match in v0.1 semantics: candidates=%v source=%v", entry.Candidates, entry.SourceFileNames)
+	}
+	if entry.Diagnostic != "" {
+		t.Fatalf("expected empty Diagnostic in v0.1 semantics, got %q", entry.Diagnostic)
+	}
+}
+
+func TestGroupFiles_DuplicateCollisionMultipleEntriesV01SemanticLock(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+		"sample2_S2_L001_R2_001.fastq.gz",
+		"sample2__S2_L001_R2_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	_, err := GroupFiles(files, rs)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error, got nil")
+	}
+
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+	if len(dupErr.Entries) == 0 {
+		t.Fatalf("expected non-empty duplicate entries")
+	}
+	if len(dupErr.Entries) != 2 {
+		t.Fatalf("expected 2 duplicate entries, got %d", len(dupErr.Entries))
+	}
+
+	expectedByRole := map[string][]string{
+		"R1": {
+			"sample1_S1_L001_R1_001.fastq.gz",
+			"sample1__S1_L001_R1_001.fastq.gz",
+		},
+		"R2": {
+			"sample2_S2_L001_R2_001.fastq.gz",
+			"sample2__S2_L001_R2_001.fastq.gz",
+		},
+	}
+
+	for _, entry := range dupErr.Entries {
+		if entry.ReasonCode != "duplicate_role_in_row" {
+			t.Fatalf("unexpected reason code: %s", entry.ReasonCode)
+		}
+
+		wantCandidates, ok := expectedByRole[entry.RoleKey]
+		if !ok {
+			t.Fatalf("unexpected role key in duplicate entry: %s", entry.RoleKey)
+		}
+
+		gotCandidates := append([]string(nil), entry.Candidates...)
+		sort.Strings(gotCandidates)
+		wantCandidates = append([]string(nil), wantCandidates...)
+		sort.Strings(wantCandidates)
+		if !reflect.DeepEqual(gotCandidates, wantCandidates) {
+			t.Fatalf("unexpected candidates for role %s: got=%v want=%v", entry.RoleKey, gotCandidates, wantCandidates)
+		}
+
+		delete(expectedByRole, entry.RoleKey)
+	}
+
+	if len(expectedByRole) != 0 {
+		t.Fatalf("missing duplicate entries for roles: %v", expectedByRole)
+	}
+}
+
 func TestGroupFiles_NoDuplicateKeepsNormalBehavior(t *testing.T) {
 	files := []string{
 		"sample1_S1_L001_R1_001.fastq.gz",
