@@ -2,10 +2,11 @@ package block
 
 import (
 	"fmt"
+	"path/filepath"
+
 	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
 	"github.com/seoyhaein/api-protos/gen/go/datablock/ichthys/service"
 	"github.com/seoyhaein/tori/rules"
-	"path/filepath"
 )
 
 //TODO pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys" "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys/service" 없애는 방향으로

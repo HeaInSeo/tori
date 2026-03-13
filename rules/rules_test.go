@@ -1,8 +1,8 @@
 package rules
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -157,9 +157,15 @@ func TestIsValidRuleSet(t *testing.T) {
 
 func TestListFilesExclude(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(dir, "skip.json"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(dir, "invalid_files"), []byte(""), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0644); err != nil {
+		t.Fatalf("write keep.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skip.json"), []byte(""), 0644); err != nil {
+		t.Fatalf("write skip.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "invalid_files"), []byte(""), 0644); err != nil {
+		t.Fatalf("write invalid_files: %v", err)
+	}
 
 	files, err := ListFilesExclude(dir, []string{"*.json", "invalid_files"})
 	if err != nil {

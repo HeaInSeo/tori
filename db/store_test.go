@@ -4,18 +4,18 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"testing/fstest"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"testing/fstest"
 )
 
 func setupChangeFS(t *testing.T) {
 	t.Helper()
 	old := sqlFiles
 	sqlFiles = fstest.MapFS{
-		"queries/insert_file.sql":  &fstest.MapFile{Data: []byte("INSERT INTO files VALUES (?,?,?)")},
-		"queries/update_file.sql":  &fstest.MapFile{Data: []byte("UPDATE files SET size=? WHERE id=?")},
-		"queries/delete_file.sql":  &fstest.MapFile{Data: []byte("DELETE FROM files WHERE id=?")},
+		"queries/insert_file.sql": &fstest.MapFile{Data: []byte("INSERT INTO files VALUES (?,?,?)")},
+		"queries/update_file.sql": &fstest.MapFile{Data: []byte("UPDATE files SET size=? WHERE id=?")},
+		"queries/delete_file.sql": &fstest.MapFile{Data: []byte("DELETE FROM files WHERE id=?")},
 	}
 	t.Cleanup(func() { sqlFiles = old })
 }

@@ -3,14 +3,15 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	_ "github.com/mattn/go-sqlite3"
 	c "github.com/seoyhaein/tori/config"
 	dbUtils "github.com/seoyhaein/tori/db"
 	globallog "github.com/seoyhaein/tori/log"
 	"github.com/seoyhaein/tori/service"
 	"github.com/spf13/cobra"
-	"os"
-	"path/filepath"
 )
 
 var (

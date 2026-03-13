@@ -3,10 +3,11 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	globallog "github.com/seoyhaein/tori/log"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	globallog "github.com/seoyhaein/tori/log"
 )
 
 type Config struct {

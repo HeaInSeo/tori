@@ -11,9 +11,15 @@ import (
 // TestGetSubFolders verifies sub directory listing with exclusions.
 func TestGetSubFolders(t *testing.T) {
 	root := t.TempDir()
-	os.Mkdir(filepath.Join(root, "a"), 0755)
-	os.Mkdir(filepath.Join(root, "b"), 0755)
-	os.Mkdir(filepath.Join(root, "skip"), 0755)
+	if err := os.Mkdir(filepath.Join(root, "a"), 0755); err != nil {
+		t.Fatalf("mkdir a: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "b"), 0755); err != nil {
+		t.Fatalf("mkdir b: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "skip"), 0755); err != nil {
+		t.Fatalf("mkdir skip: %v", err)
+	}
 	folders, err := GetSubFolders(root, []string{"skip"})
 	if err != nil {
 		t.Fatalf("GetSubFolders error: %v", err)
@@ -27,9 +33,15 @@ func TestGetSubFolders(t *testing.T) {
 func TestGetFoldersInfo(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
-	os.Mkdir(sub, 0755)
-	os.WriteFile(filepath.Join(sub, "f1.txt"), []byte("abc"), 0644)
-	os.WriteFile(filepath.Join(sub, "f2.csv"), []byte("d"), 0644)
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f1.txt"), []byte("abc"), 0644); err != nil {
+		t.Fatalf("write f1.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f2.csv"), []byte("d"), 0644); err != nil {
+		t.Fatalf("write f2.csv: %v", err)
+	}
 	folders, err := GetFoldersInfo(root, []string{"*.csv"})
 	if err != nil {
 		t.Fatalf("GetFoldersInfo error: %v", err)
@@ -48,7 +60,11 @@ func TestCheckForeignKeysEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("close db: %v", closeErr)
+		}
+	}()
 	on, err := CheckForeignKeysEnabled(db)
 	if err != nil {
 		t.Fatalf("CheckForeignKeysEnabled error: %v", err)
@@ -70,7 +86,9 @@ func TestClearDatabase(t *testing.T) {
 		t.Fatalf("ClearDatabase error: %v", err)
 	}
 	var n int
-	db.QueryRow("SELECT COUNT(*) FROM folders").Scan(&n)
+	if err := db.QueryRow("SELECT COUNT(*) FROM folders").Scan(&n); err != nil {
+		t.Fatalf("scan count: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("expected 0 rows, got %d", n)
 	}
@@ -78,12 +96,20 @@ func TestClearDatabase(t *testing.T) {
 
 func TestCompareFoldersMatch(t *testing.T) {
 	db := SetupInMemoryDB(t)
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("close db: %v", closeErr)
+		}
+	}()
 	root := t.TempDir()
 	sub := filepath.Join(root, "dir")
-	os.Mkdir(sub, 0755)
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatalf("mkdir dir: %v", err)
+	}
 	// create file to give size
-	os.WriteFile(filepath.Join(sub, "f1.txt"), []byte("hi"), 0644)
+	if err := os.WriteFile(filepath.Join(sub, "f1.txt"), []byte("hi"), 0644); err != nil {
+		t.Fatalf("write f1.txt: %v", err)
+	}
 	// insert folder info in DB matching disk
 	_, err := db.Exec("INSERT INTO folders(path,total_size,file_count) VALUES(?,?,?)", sub, int64(2), int64(1))
 	if err != nil {
@@ -100,12 +126,18 @@ func TestCompareFoldersMatch(t *testing.T) {
 
 func TestCompareFilesMatch(t *testing.T) {
 	db := SetupInMemoryDB(t)
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("close db: %v", closeErr)
+		}
+	}()
 	root := t.TempDir()
 	// folder path
 	folder := root
 	// create file on disk
-	os.WriteFile(filepath.Join(folder, "f1.txt"), []byte("abc"), 0644)
+	if err := os.WriteFile(filepath.Join(folder, "f1.txt"), []byte("abc"), 0644); err != nil {
+		t.Fatalf("write f1.txt: %v", err)
+	}
 	// insert folder and file in DB
 	res, err := db.Exec("INSERT INTO folders(path,total_size,file_count) VALUES(?,?,?)", folder, int64(3), int64(1))
 	if err != nil {

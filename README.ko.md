@@ -3,9 +3,10 @@
 영문: [README.md](README.md) | 한글: [README.ko.md](README.ko.md)
 
 ## 현재 단계
-- 단계: **Track A / Phase A-2 Duplicate Policy Design 진행 중**
+- 단계: **Track A / Phase A-2 Duplicate Policy 최소 contract 구현 완료**
 - baseline 상태: **Phase 0 baseline은 실무 개발 기준으로 확보됨**
 - A-1 상태: **Phase A-1 1차 freeze(A/B/C/D/E) 완료**
+- A-2 상태: **최소 duplicate collision error contract가 `rules.GroupFiles`에 반영됨**
 - 현재 우선순위: **Track A (File/Data structuring)**
 
 ## 코어 baseline 범위
@@ -25,6 +26,8 @@
 - [`docs/fileblock_rule_resolution_spec_v0.1.1.md`](docs/fileblock_rule_resolution_spec_v0.1.1.md)
 - [`docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md`](docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md)
 - [`docs/tori_phase0_environment_setup_checklist_v0.1.md`](docs/tori_phase0_environment_setup_checklist_v0.1.md)
+- [`docs/duplicate_policy_design_note_v0.1.md`](docs/duplicate_policy_design_note_v0.1.md)
+- [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
 
 ## 보류 영역(명시)
 - `service` 테스트 실패는 stale transport/runtime 계약 문제로 분류되어 보류 중이다.

@@ -1,6 +1,17 @@
 # Track A / A-2 Duplicate Policy Minimum Contract v0.1
-### 상태: 구현 직전 계약 초안
+### 상태: 최소 구현 contract (`rules.GroupFiles`) 반영됨
 ### 기준선: A-1 current behavior freeze + A-2 duplicate policy design
+
+## 0. 구현 상태 메모
+
+2026-03-13 기준 최소 contract는 `rules.GroupFiles`에 반영되었다.
+
+- duplicate collision 발생 시 `error` 반환
+- 반환 타입은 `DuplicateCollisionError`
+- entry reason code는 `duplicate_role_in_row`
+- A-1 Fixture D overwrite anchor는 `rules/current_semantics_freeze_test.go`에서 historical skip으로 유지
+
+즉 이 문서는 더 이상 구현 전 초안만이 아니라, 현재 활성 contract의 최소 기준선으로 사용한다.
 
 ## 1. 목적
 

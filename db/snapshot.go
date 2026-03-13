@@ -3,10 +3,11 @@ package db
 import (
 	"context"
 	"database/sql"
-	"github.com/seoyhaein/tori/block"
-	globallog "github.com/seoyhaein/tori/log"
 	"os"
 	"path/filepath"
+
+	"github.com/seoyhaein/tori/block"
+	globallog "github.com/seoyhaein/tori/log"
 )
 
 // SyncFolders 는 DB 스냅샷 비교부터 DataBlock 파일 생성까지 모두 처리 TODO SyncFolders, DiffFolders 들ㅇ가는 입력 파라미터 수정할 필요 있음.
@@ -24,7 +25,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	firstRun := os.IsNotExist(statErr)
 
 	// 3) 업데이트 필요 여부 판단
-	needsUpdate := firstRun || !(fDiff == nil && fChange == nil)
+	needsUpdate := firstRun || fDiff != nil || fChange != nil
 	if !needsUpdate {
 		globallog.Log.Info("all files and folders are same & datablock.pb exists; skipping update.")
 		return false, nil

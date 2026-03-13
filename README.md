@@ -3,9 +3,10 @@
 English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 
 ## Current Stage
-- Phase: **Track A / Phase A-2 Duplicate Policy Design (in progress)**
+- Phase: **Track A / Phase A-2 Duplicate Policy minimum contract implemented**
 - Baseline status: **Phase 0 baseline is established for practical development**
 - A-1 status: **Phase A-1 first freeze is completed (A/B/C/D/E)**
+- A-2 status: **minimum duplicate collision error contract is active in `rules.GroupFiles`**
 - Immediate priority: **Track A (File/Data structuring)**
 
 ## Baseline Scope
@@ -25,6 +26,8 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/fileblock_rule_resolution_spec_v0.1.1.md`](docs/fileblock_rule_resolution_spec_v0.1.1.md)
 - [`docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md`](docs/phase_a1_current_semantics_freeze_workplan_v0.1.1.md)
 - [`docs/tori_phase0_environment_setup_checklist_v0.1.md`](docs/tori_phase0_environment_setup_checklist_v0.1.md)
+- [`docs/duplicate_policy_design_note_v0.1.md`](docs/duplicate_policy_design_note_v0.1.md)
+- [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
 
 ## Deferred Area (Explicit)
 - `service` tests currently fail due to stale transport/runtime contracts.

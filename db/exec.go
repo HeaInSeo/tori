@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
-	globallog "github.com/seoyhaein/tori/log"
 	"io/fs"
 	"strings"
+
+	globallog "github.com/seoyhaein/tori/log"
 )
 
 var (

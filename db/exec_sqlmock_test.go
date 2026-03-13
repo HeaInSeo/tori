@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/DATA-DOG/go-sqlmock"
 	"io/fs"
 	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 // 참고: "Unable to resolve table 'test'" 또는 다른 경고는 SQL 구문에서 참조하는 테이블이 실제 데이터베이스에 없어서 발생함.
