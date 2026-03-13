@@ -335,6 +335,46 @@ func TestExportResultsCSV(t *testing.T) {
 	}
 }
 
+// This test freezes current serialization behavior only.
+// It intentionally records that header ordering and data column fill ordering can diverge.
+func TestExportResultsCSV_CurrentBehaviorAnchor_HeaderAndDiscoveredKeyOrderingCanDiverge(t *testing.T) {
+	dir := t.TempDir()
+	result := map[int]map[string]string{
+		0: {"R1": "row0-r1.fastq.gz", "R2": "row0-r2.fastq.gz"},
+	}
+	headers := []string{"R2", "R1"}
+
+	if err := ExportResultsCSV(result, headers, dir); err != nil {
+		t.Fatalf("ExportResultsCSV error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	if err != nil {
+		t.Fatalf("failed to read csv: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	headerColumns := strings.Split(lines[0], ",")
+	if !reflect.DeepEqual(headerColumns, []string{"Row", "R2", "R1"}) {
+		t.Fatalf("unexpected header row: %v", headerColumns)
+	}
+
+	dataColumns := strings.Split(lines[1], ",")
+	if len(dataColumns) != 3 {
+		t.Fatalf("unexpected data row width: %v", dataColumns)
+	}
+	if dataColumns[0] != "Row0" {
+		t.Fatalf("unexpected row label: %s", dataColumns[0])
+	}
+	if dataColumns[1] != "row0-r1.fastq.gz" || dataColumns[2] != "row0-r2.fastq.gz" {
+		t.Fatalf("expected data row to follow discovered key ordering, got %v", dataColumns)
+	}
+}
+
 func TestLoadRuleSetFromFile(t *testing.T) {
 	dir := t.TempDir()
 	rs := RuleSet{Delimiter: []string{"_"}, Header: []string{"A"}, RowRules: RowRules{MatchParts: []int{0}}, ColumnRules: ColumnRules{MatchParts: []int{0}}}
