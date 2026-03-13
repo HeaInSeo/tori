@@ -48,12 +48,12 @@ golangci-lint:
 		TMP="$$(mktemp -d)"; \
 		curl -fsSL "$$URL" -o "$$TMP/lint.tgz"; \
 		curl -fsSL "$$SUM_URL" -o "$$TMP/checksums.txt"; \
-		EXPECTED="$$(awk -v f="$$FILE" '$$2==f{print $$1}' "$$TMP/checksums.txt")"; \
+		EXPECTED="$$(awk -v f="$$FILE" "\$$2==f{print \$$1}" "$$TMP/checksums.txt")"; \
 		if [ -z "$$EXPECTED" ]; then echo "checksum not found for $$FILE"; exit 1; fi; \
 		if command -v sha256sum >/dev/null 2>&1; then \
-			ACTUAL="$$(sha256sum "$$TMP/lint.tgz" | awk '{print $$1}')"; \
+			ACTUAL="$$(sha256sum "$$TMP/lint.tgz" | awk "{print \$$1}")"; \
 		elif command -v shasum >/dev/null 2>&1; then \
-			ACTUAL="$$(shasum -a 256 "$$TMP/lint.tgz" | awk '{print $$1}')"; \
+			ACTUAL="$$(shasum -a 256 "$$TMP/lint.tgz" | awk "{print \$$1}")"; \
 		else \
 			echo "no sha256 tool found (sha256sum/shasum)"; exit 1; \
 		fi; \
