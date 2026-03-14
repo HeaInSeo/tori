@@ -505,32 +505,9 @@ func TestDiagnosticsObservationBoundary_CanComputeMissingAndExtraKeysFromHeaders
 	}
 }
 
-// This is an investigation test only.
-// It checks that a helper-shaped local function with headers + rowMap input is still a natural boundary.
-func TestDiagnosticsObservationBoundary_HelperShapedLocalFunctionFeelsSufficient(t *testing.T) {
-	collectMissingAndExtraKeys := func(headers []string, rowMap map[string]string) (missing []string, extra []string) {
-		headerSet := make(map[string]struct{}, len(headers))
-		for _, header := range headers {
-			headerSet[header] = struct{}{}
-		}
-
-		for _, header := range headers {
-			if _, ok := rowMap[header]; !ok {
-				missing = append(missing, header)
-			}
-		}
-
-		for key := range rowMap {
-			if _, ok := headerSet[key]; !ok {
-				extra = append(extra, key)
-			}
-		}
-
-		sort.Strings(missing)
-		sort.Strings(extra)
-		return missing, extra
-	}
-
+// This test verifies the extracted private helper boundary only.
+// It does not introduce warning/report structure or change export semantics.
+func TestCollectMissingAndExtraKeys(t *testing.T) {
 	headers := []string{"Row", "R1", "R2"}
 	rowMap := map[string]string{
 		"Row": "sample1",

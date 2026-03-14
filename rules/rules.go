@@ -321,6 +321,29 @@ func ListFilesExclude(dirPath string, exclusions []string) ([]string, error) {
 
 // SaveResultMapToCSV validRows(map[int]map[string]string) + headers → CSV 파일로 저장
 
+func collectMissingAndExtraKeys(headers []string, rowMap map[string]string) (missing []string, extra []string) {
+	headerSet := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		headerSet[header] = struct{}{}
+	}
+
+	for _, header := range headers {
+		if _, ok := rowMap[header]; !ok {
+			missing = append(missing, header)
+		}
+	}
+
+	for key := range rowMap {
+		if _, ok := headerSet[key]; !ok {
+			extra = append(extra, key)
+		}
+	}
+
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return missing, extra
+}
+
 // ExportResultsCSV validRows(map[int]map[string]string) + headers → CSV 파일로 저장
 func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, outputDir string) error {
 	path, err := utils.CheckPath(outputDir)
@@ -359,9 +382,17 @@ func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, out
 	// 각 row 순서대로 CSV 에 작성
 	for i := 0; i < len(resultMap); i++ {
 		rowMap := resultMap[i]
+		missing, _ := collectMissingAndExtraKeys(headers, rowMap)
+		missingSet := make(map[string]struct{}, len(missing))
+		for _, key := range missing {
+			missingSet[key] = struct{}{}
+		}
 		record := make([]string, len(headers)+1)
 		record[0] = fmt.Sprintf("Row%d", i)
 		for j, colKey := range headers {
+			if _, isMissing := missingSet[colKey]; isMissing {
+				continue
+			}
 			if val, ok := rowMap[colKey]; ok {
 				record[j+1] = val
 			}
