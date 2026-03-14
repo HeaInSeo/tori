@@ -24,6 +24,11 @@
 | `warning/report` | missing/extra 를 구조적으로 보고하지만 export 는 계속 | 관찰 가능성을 높이면서도 흐름을 유지한다 | report surface 를 별도 정의해야 한다 |
 | `strict` | missing/extra 를 에러로 취급 | contract 가 가장 명확하다 | 현재 Track A 최소 범위를 넘길 가능성이 있다 |
 
+임시 권장 방향:
+- 다음 최소 단계에서는 export surface 를 당분간 permissive 로 유지하는 편이 보수적이다.
+- 즉 missing column 은 빈칸 export 를 유지하고, extra column 은 export surface 비노출을 유지한다.
+- completeness/validation 축에서는 향후 warning/report 가능성을 열어 두되, 아직 strict error 정책으로 바로 전환하지는 않는다.
+
 ## 4) 이번 단계의 1차 비목표
 
 - multi-role 일반화는 이번 메모 범위 밖이다.
