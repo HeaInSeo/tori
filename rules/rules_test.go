@@ -505,6 +505,49 @@ func TestDiagnosticsObservationBoundary_CanComputeMissingAndExtraKeysFromHeaders
 	}
 }
 
+// This is an investigation test only.
+// It checks that a helper-shaped local function with headers + rowMap input is still a natural boundary.
+func TestDiagnosticsObservationBoundary_HelperShapedLocalFunctionFeelsSufficient(t *testing.T) {
+	collectMissingAndExtraKeys := func(headers []string, rowMap map[string]string) (missing []string, extra []string) {
+		headerSet := make(map[string]struct{}, len(headers))
+		for _, header := range headers {
+			headerSet[header] = struct{}{}
+		}
+
+		for _, header := range headers {
+			if _, ok := rowMap[header]; !ok {
+				missing = append(missing, header)
+			}
+		}
+
+		for key := range rowMap {
+			if _, ok := headerSet[key]; !ok {
+				extra = append(extra, key)
+			}
+		}
+
+		sort.Strings(missing)
+		sort.Strings(extra)
+		return missing, extra
+	}
+
+	headers := []string{"Row", "R1", "R2"}
+	rowMap := map[string]string{
+		"Row": "sample1",
+		"R1":  "a.fastq",
+		"X1":  "unexpected.fastq",
+	}
+
+	missing, extra := collectMissingAndExtraKeys(headers, rowMap)
+
+	if !reflect.DeepEqual(missing, []string{"R2"}) {
+		t.Fatalf("unexpected missing keys: %v", missing)
+	}
+	if !reflect.DeepEqual(extra, []string{"X1"}) {
+		t.Fatalf("unexpected extra keys: %v", extra)
+	}
+}
+
 func TestLoadRuleSetFromFile(t *testing.T) {
 	dir := t.TempDir()
 	rs := RuleSet{Delimiter: []string{"_"}, Header: []string{"A"}, RowRules: RowRules{MatchParts: []int{0}}, ColumnRules: ColumnRules{MatchParts: []int{0}}}
