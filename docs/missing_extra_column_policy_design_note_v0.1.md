@@ -29,6 +29,11 @@
 - 즉 missing column 은 빈칸 export 를 유지하고, extra column 은 export surface 비노출을 유지한다.
 - completeness/validation 축에서는 향후 warning/report 가능성을 열어 두되, 아직 strict error 정책으로 바로 전환하지는 않는다.
 
+전환 메모:
+- 다음 단계에서도 export surface 기준선은 그대로 유지한다.
+- 다음 최소 patch는 export semantics 변경이 아니라, `rules` 계층 안의 기존 정보/구조로 missing/extra 관찰 경로를 탐색하는 데 한정한다.
+- 즉 future warning/report 가능성을 보기 위한 조사 단계이며, UI/FileBlock/runtime/service 쪽 확장은 아직 다루지 않는다.
+
 ## 4) 이번 단계의 1차 비목표
 
 - multi-role 일반화는 이번 메모 범위 밖이다.
