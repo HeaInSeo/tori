@@ -34,6 +34,11 @@
 - 다음 최소 patch는 export semantics 변경이 아니라, `rules` 계층 안의 기존 정보/구조로 missing/extra 관찰 경로를 탐색하는 데 한정한다.
 - 즉 future warning/report 가능성을 보기 위한 조사 단계이며, UI/FileBlock/runtime/service 쪽 확장은 아직 다루지 않는다.
 
+관찰 경계 메모:
+- 현재 `headers + rowMap` 조합이 missing/extra 를 계산할 수 있는 최소 관찰 경계다.
+- 이 경계 이후 `ExportResultsCSV`가 export surface 를 만들면 missing/extra 의미는 구조화된 diagnostics 로 남지 않고 소실된다.
+- 따라서 다음 최소 patch는 export semantics 변경이 아니라, 이 경계에서 diagnostics 계산 가능성을 검증하는 작은 helper/test 탐색으로 제한하는 편이 적절하다.
+
 ## 4) 이번 단계의 1차 비목표
 
 - multi-role 일반화는 이번 메모 범위 밖이다.
