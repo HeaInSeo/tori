@@ -416,6 +416,55 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_MissingHeaderColumnExportsEmptyC
 	}
 }
 
+// This test anchors current export behavior only.
+// It records that a row-defined extra column is not surfaced when it is absent from headers.
+func TestExportResultsCSV_CurrentBehaviorAnchor_ExtraRowColumnIsNotExported(t *testing.T) {
+	dir := t.TempDir()
+	result := map[int]map[string]string{
+		0: {
+			"R1":    "row0-r1.fastq.gz",
+			"EXTRA": "row0-extra.fastq.gz",
+		},
+	}
+	headers := []string{"R2", "R1"}
+
+	if err := ExportResultsCSV(result, headers, dir); err != nil {
+		t.Fatalf("ExportResultsCSV error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	if err != nil {
+		t.Fatalf("failed to read csv: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	headerColumns := strings.Split(lines[0], ",")
+	if !reflect.DeepEqual(headerColumns, []string{"Row", "R2", "R1"}) {
+		t.Fatalf("unexpected header row: %v", headerColumns)
+	}
+
+	dataColumns := strings.Split(lines[1], ",")
+	if len(dataColumns) != 3 {
+		t.Fatalf("expected export surface to contain only header-defined columns, got %v", dataColumns)
+	}
+	if dataColumns[0] != "Row0" {
+		t.Fatalf("unexpected row label: %s", dataColumns[0])
+	}
+	if dataColumns[1] != "" {
+		t.Fatalf("expected missing header-defined column to remain empty, got %q", dataColumns[1])
+	}
+	if dataColumns[2] != "row0-r1.fastq.gz" {
+		t.Fatalf("expected header-defined column value to remain at its header position, got %v", dataColumns)
+	}
+	if strings.Contains(lines[1], "row0-extra.fastq.gz") {
+		t.Fatalf("expected extra row column to be absent from CSV export surface, got %q", lines[1])
+	}
+}
+
 func TestLoadRuleSetFromFile(t *testing.T) {
 	dir := t.TempDir()
 	rs := RuleSet{Delimiter: []string{"_"}, Header: []string{"A"}, RowRules: RowRules{MatchParts: []int{0}}, ColumnRules: ColumnRules{MatchParts: []int{0}}}
