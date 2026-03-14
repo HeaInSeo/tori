@@ -465,6 +465,46 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_ExtraRowColumnIsNotExported(t *t
 	}
 }
 
+// This is an investigation test only.
+// It checks that the headers + rowMap boundary is already enough to observe missing and extra keys.
+func TestDiagnosticsObservationBoundary_CanComputeMissingAndExtraKeysFromHeadersAndRowMap(t *testing.T) {
+	headers := []string{"Row", "R1", "R2"}
+	rowMap := map[string]string{
+		"Row": "sample1",
+		"R1":  "a.fastq",
+		"X1":  "unexpected.fastq",
+	}
+
+	headerSet := make(map[string]struct{}, len(headers))
+	for _, header := range headers {
+		headerSet[header] = struct{}{}
+	}
+
+	missing := make([]string, 0)
+	for _, header := range headers {
+		if _, ok := rowMap[header]; !ok {
+			missing = append(missing, header)
+		}
+	}
+
+	extra := make([]string, 0)
+	for key := range rowMap {
+		if _, ok := headerSet[key]; !ok {
+			extra = append(extra, key)
+		}
+	}
+
+	sort.Strings(missing)
+	sort.Strings(extra)
+
+	if !reflect.DeepEqual(missing, []string{"R2"}) {
+		t.Fatalf("unexpected missing keys: %v", missing)
+	}
+	if !reflect.DeepEqual(extra, []string{"X1"}) {
+		t.Fatalf("unexpected extra keys: %v", extra)
+	}
+}
+
 func TestLoadRuleSetFromFile(t *testing.T) {
 	dir := t.TempDir()
 	rs := RuleSet{Delimiter: []string{"_"}, Header: []string{"A"}, RowRules: RowRules{MatchParts: []int{0}}, ColumnRules: ColumnRules{MatchParts: []int{0}}}
