@@ -1,0 +1,17 @@
+db/exec_sqlmock_test.go:439:19: Rows/Stmt/NamedStmt was not closed (sqlclosecheck)
+	_, err = querySQL(context.Background(), db, "nonexistent.sql")
+	                 ^
+db/exec_sqlmock_test.go:463:19: Rows/Stmt/NamedStmt was not closed (sqlclosecheck)
+	_, err = querySQL(context.Background(), db, "test_empty.sql")
+	                 ^
+db/exec_sqlmock_test.go:528:19: Rows/Stmt/NamedStmt was not closed (sqlclosecheck)
+	_, err = querySQL(context.Background(), db, "test_select_fail.sql")
+	                 ^
+db/store_inmemory_test.go:589:23: Close should use defer (sqlclosecheck)
+		if err := rows.Close(); err != nil {
+		                    ^
+db/store_inmemory_test.go:720:23: Close should use defer (sqlclosecheck)
+		if err := rows.Close(); err != nil {
+		                    ^
+5 issues:
+* sqlclosecheck: 5

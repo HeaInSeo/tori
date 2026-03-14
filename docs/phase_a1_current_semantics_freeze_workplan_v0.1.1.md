@@ -95,7 +95,7 @@
 
 - `columnRules.matchParts`에 해당하는 token들을 `_`로 join해 `colKey`를 만든다.
 - 한 row 안에서 `colKey -> fileName` 으로 저장된다.
-- 같은 row/column key 충돌 시 현재 구조상 overwrite 가능성이 있다.
+- A-1 기준선에서는 같은 row/column key 충돌 시 overwrite 관찰값이 기록되었고, 현재 구현 기준선은 `DuplicateCollisionError` 반환이다.
 
 ### 4.5 valid / invalid 분리
 
@@ -132,7 +132,7 @@
 2. row identity가 실제로는 logical identity가 아니라 encounter-order 기반 index다.
 3. `FilterGroups()`가 valid row를 다시 재번호 매긴다.
 4. `map[string]string` 구조는 role당 단일 파일만 표현 가능하다.
-5. duplicate collision은 현재 명시 정책 없이 overwrite 가능성이 있다.
+5. duplicate collision의 overwrite는 A-1 historical anchor로 기록되어 있으며, 현재 구현 기준선은 `DuplicateCollisionError` 기반 최소 contract다.
 6. invalid 결과는 구조화된 산출물이 아니라 timestamp txt 파일 중심이다.
 7. CSV export는 `headers`와 실제 discovered `colKey` 사이에 의미 불일치가 생길 수 있다.
 
@@ -203,7 +203,7 @@
 
 예상 목적:
 - 같은 row/column key를 가지는 파일 2개 이상 입력
-- 현재 overwrite되는지, 어떤 결과가 남는지 문서와 테스트로 고정
+- A-1에서 관찰된 overwrite anchor와, 현재 구현의 `DuplicateCollisionError` 기준선을 혼동 없이 구분해 기록
 
 #### Fixture Set E — export ordering 사례
 
@@ -216,7 +216,7 @@
 - [x] Fixture Set A 추가/검증 완료 (정상 pair-end)
 - [x] Fixture Set B 추가/검증 완료 (invalid row)
 - [x] Fixture Set C 추가/검증 완료 (연속 delimiter tokenization 경계)
-- [x] Fixture Set D 추가/검증 완료 (duplicate collision overwrite current behavior 기록)
+- [x] Fixture Set D 추가/검증 완료 (duplicate collision historical overwrite anchor 기록)
 - [x] Fixture Set E 추가/검증 완료 (ExportResultsCSV current serialization ordering 기록)
 
 최근 상태 메모 (2026-03-13 기준):
@@ -286,7 +286,7 @@
 - pair-end 전용 해석의 한계
 - multi-role generalization 필요성
 - schema validator 필요성
-- duplicate collision 정책 부재
+- duplicate collision historical overwrite anchor와 현재 typed error 기준선의 분리 필요
 - row identity 불안정성
 - invalid report 구조화 필요성
 
@@ -334,7 +334,7 @@ rules/
 
 1. 현재 `rule.json` pair-end 예시를 기준으로 정상 fixture가 통과한다. fileciteturn13file3
 2. invalid fixture가 통과한다.
-3. duplicate collision 현재 동작이 테스트와 문서에 고정된다.
+3. duplicate collision historical anchor와 현재 구현 기준선이 테스트와 문서에서 구분되어 기록된다.
 4. CSV export 결과가 snapshot 또는 golden file로 고정된다.
 5. 현재 한계 목록이 문서로 정리된다.
 6. 구조체 승격이 있었다면, 의미론을 바꾸지 않았음이 확인된다.
@@ -349,11 +349,11 @@ rules/
 - 판정: **Phase A-1 1차 완료**
 - 근거:
 1. A/B/C/D/E fixture+freeze test가 모두 추가되어 현재 의미론의 핵심 경계가 고정되었다.
-2. duplicate collision / export ordering에 대해 current behavior와 final policy를 분리해 기록했다.
+2. duplicate collision historical anchor / 현재 typed error 기준선 / export ordering current behavior를 분리해 기록했다.
 3. 의미론 변경 없이 테스트/fixture 중심으로 기준선을 확보했다.
 
 - 아직 열린 항목(Phase A-2 입력):
-1. duplicate collision final policy 정의
+1. duplicate collision 최소 contract 이후 확장 범위 정의
 2. multi-role schema generalization
 3. canonical column policy(헤더/role/serialization 일관성) 정의
 

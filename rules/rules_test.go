@@ -335,9 +335,7 @@ func TestExportResultsCSV(t *testing.T) {
 	}
 }
 
-// This test freezes current serialization behavior only.
-// It intentionally records that header ordering and data column fill ordering can diverge.
-func TestExportResultsCSV_CurrentBehaviorAnchor_HeaderAndDiscoveredKeyOrderingCanDiverge(t *testing.T) {
+func TestExportResultsCSV_CanonicalBehavior_DataFollowsHeaderOrdering(t *testing.T) {
 	dir := t.TempDir()
 	result := map[int]map[string]string{
 		0: {"R1": "row0-r1.fastq.gz", "R2": "row0-r2.fastq.gz"},
@@ -370,8 +368,51 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_HeaderAndDiscoveredKeyOrderingCa
 	if dataColumns[0] != "Row0" {
 		t.Fatalf("unexpected row label: %s", dataColumns[0])
 	}
-	if dataColumns[1] != "row0-r1.fastq.gz" || dataColumns[2] != "row0-r2.fastq.gz" {
-		t.Fatalf("expected data row to follow discovered key ordering, got %v", dataColumns)
+	if dataColumns[1] != "row0-r2.fastq.gz" || dataColumns[2] != "row0-r1.fastq.gz" {
+		t.Fatalf("expected data row to follow header ordering, got %v", dataColumns)
+	}
+}
+
+// This test anchors current export behavior only.
+// It records that a header-defined but missing column is exported as an empty cell.
+func TestExportResultsCSV_CurrentBehaviorAnchor_MissingHeaderColumnExportsEmptyCell(t *testing.T) {
+	dir := t.TempDir()
+	result := map[int]map[string]string{
+		0: {"R1": "row0-r1.fastq.gz"},
+	}
+	headers := []string{"R2", "R1"}
+
+	if err := ExportResultsCSV(result, headers, dir); err != nil {
+		t.Fatalf("ExportResultsCSV error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	if err != nil {
+		t.Fatalf("failed to read csv: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	headerColumns := strings.Split(lines[0], ",")
+	if !reflect.DeepEqual(headerColumns, []string{"Row", "R2", "R1"}) {
+		t.Fatalf("unexpected header row: %v", headerColumns)
+	}
+
+	dataColumns := strings.Split(lines[1], ",")
+	if len(dataColumns) != 3 {
+		t.Fatalf("unexpected data row width: %v", dataColumns)
+	}
+	if dataColumns[0] != "Row0" {
+		t.Fatalf("unexpected row label: %s", dataColumns[0])
+	}
+	if dataColumns[1] != "" {
+		t.Fatalf("expected missing header column to export as empty cell, got %q", dataColumns[1])
+	}
+	if dataColumns[2] != "row0-r1.fastq.gz" {
+		t.Fatalf("expected existing column value to remain at its header position, got %v", dataColumns)
 	}
 }
 

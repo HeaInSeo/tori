@@ -1,0 +1,38 @@
+db/connection_test.go:105:12: G301: Expect directory permissions to be 0750 or less (gosec)
+	if err := os.MkdirAll(folderPath, 0755); err != nil {
+	          ^
+db/connection_test.go:110:12: G306: Expect WriteFile permissions to be 0600 or less (gosec)
+	if err := os.WriteFile(filePath, content, 0644); err != nil {
+	          ^
+db/fs_test.go:141:9: G301: Expect directory permissions to be 0750 or less (gosec)
+	err := os.MkdirAll(path, os.ModePerm)
+	       ^
+db/fs_test.go:228:9: G301: Expect directory permissions to be 0750 or less (gosec)
+	err := os.MkdirAll(path, os.ModePerm)
+	       ^
+db/store_inmemory_test.go:42:14: G306: Expect WriteFile permissions to be 0600 or less (gosec)
+			if err := os.WriteFile(rulePath, []byte("{}"), 0644); err != nil {
+			          ^
+rules/rules.go:70:15: G304: Potential file inclusion via variable (gosec)
+	data, err := os.ReadFile(jsonFile)
+	             ^
+rules/rules.go:171:12: G304: Potential file inclusion via variable (gosec)
+	f, err := os.Create(outFile)
+	          ^
+rules/rules.go:273:12: G304: Potential file inclusion via variable (gosec)
+	f, err := os.Create(csvFile)
+	          ^
+rules/rules_test.go:56:2: G104: Errors unhandled (gosec)
+	os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0644)
+	^
+rules/rules_test.go:57:2: G104: Errors unhandled (gosec)
+	os.WriteFile(filepath.Join(dir, "skip.json"), []byte(""), 0644)
+	^
+rules/rules_test.go:58:2: G104: Errors unhandled (gosec)
+	os.WriteFile(filepath.Join(dir, "invalid_files"), []byte(""), 0644)
+	^
+rules/rules_test.go:133:12: G306: Expect WriteFile permissions to be 0600 or less (gosec)
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+	          ^
+12 issues:
+* gosec: 12

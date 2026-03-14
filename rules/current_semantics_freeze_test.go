@@ -215,9 +215,11 @@ func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *te
 	}
 }
 
-// This test records serialization/output behavior only (not grouping semantics).
-// It does not assert the final intended column ordering policy.
+// This test records the historical serialization/output behavior only.
+// It is retired from the active baseline after the first canonical column ordering patch.
 func TestCurrentSemanticsFreeze_FixtureE_ExportColumnOrderCurrentSerializationBehavior(t *testing.T) {
+	t.Skip("historical A-1 anchor retired from active baseline after canonical header-ordered export patch")
+
 	fx := loadExportFreezeFixture(t, "fixture_e_export_column_order_current_serialization_behavior.json")
 	resultMap := toIndexedRows(t, fx.ResultMap)
 

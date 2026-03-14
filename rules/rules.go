@@ -41,12 +41,18 @@ type SizeRules struct {
 }
 
 type DuplicateReportEntry struct {
-	ReasonCode      string
-	RowKey          string
-	RoleKey         string
-	Candidates      []string
+	// ReasonCode is the v0.1 minimal classifier for duplicate detection.
+	ReasonCode string
+	// RowKey is the current grouping key derived from rowRules.matchParts.
+	RowKey string
+	// RoleKey is the current column key derived from columnRules.matchParts.
+	RoleKey string
+	// Candidates is the deterministic duplicate candidate set for the row/role collision.
+	Candidates []string
+	// SourceFileNames preserves the source filename context; in v0.1 it may match Candidates.
 	SourceFileNames []string
-	Diagnostic      string
+	// Diagnostic is optional in v0.1 and may be empty.
+	Diagnostic string
 }
 
 type DuplicateCollisionError struct {
@@ -54,7 +60,7 @@ type DuplicateCollisionError struct {
 }
 
 func (e *DuplicateCollisionError) Error() string {
-	return fmt.Sprintf("duplicate collision detected: %d entrie(s)", len(e.Entries))
+	return fmt.Sprintf("duplicate collision detected: %d entries", len(e.Entries))
 }
 
 // ----------------------------------------------------------------------
@@ -350,25 +356,12 @@ func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, out
 		return fmt.Errorf("failed to write header row: %w", wErr)
 	}
 
-	// 컬럼 키 집합(중복 제거) + 정렬
-	seen := make(map[string]struct{})
-	var allKeys []string
-	for _, row := range resultMap {
-		for key := range row {
-			if _, ok := seen[key]; !ok {
-				seen[key] = struct{}{}
-				allKeys = append(allKeys, key)
-			}
-		}
-	}
-	sort.Strings(allKeys)
-
 	// 각 row 순서대로 CSV 에 작성
 	for i := 0; i < len(resultMap); i++ {
 		rowMap := resultMap[i]
-		record := make([]string, len(allKeys)+1)
+		record := make([]string, len(headers)+1)
 		record[0] = fmt.Sprintf("Row%d", i)
-		for j, colKey := range allKeys {
+		for j, colKey := range headers {
 			if val, ok := rowMap[colKey]; ok {
 				record[j+1] = val
 			}
