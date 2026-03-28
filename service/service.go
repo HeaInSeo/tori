@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
-	"github.com/seoyhaein/api-protos/gen/go/datablock/ichthys/service"
 	"github.com/seoyhaein/tori/config"
 	dbUtils "github.com/seoyhaein/tori/db"
 	globallog "github.com/seoyhaein/tori/log"
+	"github.com/seoyhaein/tori/protoio"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"os"
@@ -17,7 +17,15 @@ import (
 
 var logger = globallog.Log
 
-// DataBlockCliService encapsulates core folder/database operations for CLI and gRPC.
+// DataBlockService is the transport-agnostic application service contract.
+// CLI/local in-process callers and transport adapters should depend on this interface.
+type DataBlockService interface {
+	GetDataBlock(ctx context.Context, updateAt *timestamppb.Timestamp) (*pb.DataBlock, error)
+	SaveFolders(ctx context.Context) error
+	SyncFolders(ctx context.Context) (bool, error)
+}
+
+// DataBlockCliService encapsulates core folder/database operations without owning a transport.
 type DataBlockCliService struct {
 	db  *sql.DB
 	cfg *config.Config
@@ -77,35 +85,6 @@ func (s *DataBlockCliService) SyncFolders(ctx context.Context) (bool, error) {
 	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions)
 }
 
-// DataBlockServer bridges DataBlockCliService with the gRPC interface.
-type DataBlockServer struct {
-	pb.UnimplementedDataBlockServiceServer
-	core *DataBlockCliService
-}
-
-// NewDataBlockServer wraps DataBlockCliService for gRPC.
-func NewDataBlockServer(core *DataBlockCliService) pb.DataBlockServiceServer {
-	return &DataBlockServer{core: core}
-}
-
-// SyncFolders RPC handler.
-/*func (s *DataBlockServer) SyncFolders(ctx context.Context, _ *emptypb.Empty) (*pb.SyncResponse, error) {
-	updated, err := s.core.SyncFolders(ctx)
-	return &pb.SyncResponse{Updated: updated}, err
-}*/
-
-// SaveFolders RPC handler.
-/*func (s *DataBlockServer) SaveFolders(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, s.core.SaveFolders(ctx)
-}*/
-
-// GetDataBlock RPC handler.
-/*func (s *DataBlockServer) GetDataBlock(ctx context.Context, req *pb.DataBlockRequest) (*pb.DataBlock, error) {
-	return s.core.GetDataBlock(ctx, req)
-}*/
-
-// TODO 이건 api-proto 프로젝트로 빼자.
-
 // SaveDataBlockToTextFile DataBlockData 텍스트 포맷으로 파일에 저장
 func SaveDataBlockToTextFile(filePath string, data *pb.DataBlock) error {
 	// proto 메시지를 텍스트 포맷으로 변환
@@ -124,5 +103,5 @@ func SaveDataBlockToTextFile(filePath string, data *pb.DataBlock) error {
 }
 
 func LoadDataBlock(filePath string) (*pb.DataBlock, error) {
-	return service.LoadDataBlock(filePath)
+	return protoio.LoadDataBlock(filePath)
 }
