@@ -18,7 +18,7 @@ var (
 	cfg      = c.GlobalConfig
 	logger   = globallog.Log
 	database *sql.DB
-	cliSvc   *service.DataBlockCliService
+	appSvc   service.DataBlockService
 )
 
 // TODO 명령어 시나리오 완성하자. 최대한 단순하게 자동화 되도록 하자.
@@ -39,7 +39,7 @@ func Execute() error {
 				return fmt.Errorf("DB 초기화 실패: %w", err)
 			}
 			// cfg 는 config.go 에서 init 에서 생성됨.
-			cliSvc = service.NewDataBlockCliService(database, cfg)
+			appSvc = service.NewDataBlockCliService(database, cfg)
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -120,7 +120,7 @@ func snapshotCmd() *cobra.Command {
 		Use:   "snapshot",
 		Short: "폴더 구조를 DB에 스냅샷 저장",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := cliSvc.SaveFolders(cmd.Context()); err != nil {
+			if err := appSvc.SaveFolders(cmd.Context()); err != nil {
 				return fmt.Errorf("스냅샷 저장 실패: %w", err)
 			}
 			logger.Info("폴더 구조 스냅샷 저장 완료")
@@ -135,7 +135,7 @@ func syncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "스냅샷과 실제 폴더 비교 및 동기화",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			updated, err := cliSvc.SyncFolders(cmd.Context())
+			updated, err := appSvc.SyncFolders(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("동기화 실패: %w", err)
 			}
