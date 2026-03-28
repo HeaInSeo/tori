@@ -17,13 +17,16 @@ PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: test test-core fmt vet lint lint-security vuln vuln-all golangci-lint govulncheck
+.PHONY: test test-core test-guardrail fmt vet lint lint-security vuln vuln-all golangci-lint govulncheck
 
 test:
 	go test -race ./...
 
-test-core:
+test-core: test-guardrail
 	go test -race $(PKGS_TEST_CORE)
+
+test-guardrail:
+	go test . -run TestExternalAPIProtosImportGuardrail
 
 fmt:
 	go fmt ./...
