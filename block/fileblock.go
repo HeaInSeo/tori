@@ -5,11 +5,9 @@ import (
 	"path/filepath"
 
 	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
-	"github.com/seoyhaein/api-protos/gen/go/datablock/ichthys/service"
+	"github.com/seoyhaein/tori/protoio"
 	"github.com/seoyhaein/tori/rules"
 )
-
-//TODO pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys" "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys/service" 없애는 방향으로
 
 // GenerateFileBlockFromDir 디렉터리 경로를 받아서 FileBlock 객체를 생성하고, 바이너리 protobuf 파일로 저장
 func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
@@ -51,12 +49,12 @@ func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
 	}
 
 	// 8. validMap + headers → FileBlock 객체 생성
-	fb := service.ConvertMapToFileBlock(validMap, ruleSet.Header, dirPath)
+	fb := ConvertMapToFileBlock(validMap, ruleSet.Header, dirPath)
 
 	// 9. FileBlock → 바이너리 protobuf 파일로 저장
 	outPath := filepath.Join(dirPath, filepath.Base(dirPath)+"files.pb")
-	if err := service.SaveProtoToFile(outPath, fb, 0o777); err != nil {
-		return nil, fmt.Errorf("SaveProtoToFile error: %w", err)
+	if err := protoio.SaveMessage(outPath, fb, 0o777); err != nil {
+		return nil, fmt.Errorf("SaveMessage error: %w", err)
 	}
 
 	return fb, nil
@@ -94,11 +92,11 @@ func GenerateFileBlock(filePath string, files []string) (*pb.FileBlock, error) {
 	}
 
 	// blockId 를 filePath 로 잡아둠.
-	fbd := service.ConvertMapToFileBlock(validRows, ruleSet.Header, filePath)
+	fbd := ConvertMapToFileBlock(validRows, ruleSet.Header, filePath)
 	pbName := filepath.Join(filePath, fmt.Sprintf("%sfiles.pb", filepath.Base(filePath)))
-	err = service.SaveProtoToFile(pbName, fbd, 0777)
+	err = protoio.SaveMessage(pbName, fbd, 0777)
 	if err != nil {
-		return nil, fmt.Errorf("failed to save proto to file: %w", err)
+		return nil, fmt.Errorf("failed to save proto message: %w", err)
 	}
 
 	return fbd, nil
