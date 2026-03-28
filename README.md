@@ -20,7 +20,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 ## Current Boundary Notes
 - Current structure already reflects the first boundary pass: `service` owns app orchestration, `transport/grpc` owns RPC translation, `cmd` uses the service path directly, and `protoio` owns protobuf file load/save.
 - `make test-core` remains the Track A core baseline command, but the repository is no longer described as if `service` were a currently broken area.
-- The next architecture task is not broad transport feature expansion. The smaller immediate concern is contract ownership: source `.proto`, generated code, app contract, and transport contract need to be documented more explicitly.
+- The next architecture task is not broad transport feature expansion. The current concern is keeping contract ownership, remote surface, and Phase 2 migration order explicit without starting broad import migration too early.
 
 ## Commands
 - `make test-core` runs the core baseline tests and the external `api-protos` import diffusion guardrail.
@@ -39,6 +39,10 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
 - [`docs/architecture/transport_boundary.md`](docs/architecture/transport_boundary.md)
 - [`docs/architecture/proto_contract_ownership.md`](docs/architecture/proto_contract_ownership.md)
+- [`docs/architecture/remote_rpc_surface_decision_note.md`](docs/architecture/remote_rpc_surface_decision_note.md)
+- [`docs/architecture/proto_canonicalization_phase1_note.md`](docs/architecture/proto_canonicalization_phase1_note.md)
+- [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
+- [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 
 ## Deferred Area (Explicit)
 - Final proto contract ownership is not fixed yet.
