@@ -328,7 +328,8 @@ func collectMissingAndExtraKeys(headers []string, rowMap map[string]string) (mis
 	}
 
 	for _, header := range headers {
-		if _, ok := rowMap[header]; !ok {
+		value, ok := rowMap[header]
+		if !ok || value == "" {
 			missing = append(missing, header)
 		}
 	}
@@ -339,7 +340,6 @@ func collectMissingAndExtraKeys(headers []string, rowMap map[string]string) (mis
 		}
 	}
 
-	sort.Strings(missing)
 	sort.Strings(extra)
 	return missing, extra
 }

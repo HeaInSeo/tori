@@ -425,3 +425,6 @@ Phase A-1 Current Semantics Freeze는 작아 보이지만, 이후 Track A 전체
 - row identity, invalid handling, export ordering 같은 세부 동작이 나중에 더 큰 혼란으로 번질 수 있다.
 
 따라서 이 단계의 목표는 “멋지게 개선”이 아니라, **현재를 정확히 붙잡는 것**이다.
+
+Update note: Track A 기준 현재 semantics freeze 범위는 duplicate v0.1 최소 contract, canonical export ordering(`ruleSet.Header` 기준), missing/extra observational semantics, 그 계산 seam의 private helper 분리, `pipeline_facing_binding_contract_v0.1.md`, 그리고 `TestPipelineFacingBindingProof_SingleSyntheticCase`까지 닫혀 있다. runtime/gRPC/service, multi-role 일반화, warning/report surface, strict validation contract는 계속 deferred 범위로 남겨 두며, 다음 주제는 pipeline spec 접점 정리로 이동한다.
+Binding 관련 후속 문서 체계의 읽기 순서와 역할은 `pipeline_binding_docs_index_v0.1.md`에 정리되어 있다.

@@ -465,62 +465,67 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_ExtraRowColumnIsNotExported(t *t
 	}
 }
 
-// This is an investigation test only.
-// It checks that the headers + rowMap boundary is already enough to observe missing and extra keys.
-func TestDiagnosticsObservationBoundary_CanComputeMissingAndExtraKeysFromHeadersAndRowMap(t *testing.T) {
-	headers := []string{"Row", "R1", "R2"}
+// This is a narrow synthetic proof only.
+// It shows that the pipeline-facing missing/extra observational contract does not contradict
+// the current permissive export surface for a single row case.
+func TestPipelineFacingBindingProof_SingleSyntheticCase(t *testing.T) {
+	dir := t.TempDir()
+	headers := []string{"sample_id", "bam", "bai"}
 	rowMap := map[string]string{
-		"Row": "sample1",
-		"R1":  "a.fastq",
-		"X1":  "unexpected.fastq",
+		"sample_id":  "S1",
+		"bam":        "",
+		"debug_note": "tmp",
 	}
 
-	headerSet := make(map[string]struct{}, len(headers))
-	for _, header := range headers {
-		headerSet[header] = struct{}{}
-	}
-
-	missing := make([]string, 0)
-	for _, header := range headers {
-		if _, ok := rowMap[header]; !ok {
-			missing = append(missing, header)
-		}
-	}
-
-	extra := make([]string, 0)
-	for key := range rowMap {
-		if _, ok := headerSet[key]; !ok {
-			extra = append(extra, key)
-		}
-	}
-
-	sort.Strings(missing)
-	sort.Strings(extra)
-
-	if !reflect.DeepEqual(missing, []string{"R2"}) {
+	missing, extra := collectMissingAndExtraKeys(headers, rowMap)
+	if !reflect.DeepEqual(missing, []string{"bam", "bai"}) {
 		t.Fatalf("unexpected missing keys: %v", missing)
 	}
-	if !reflect.DeepEqual(extra, []string{"X1"}) {
+	if !reflect.DeepEqual(extra, []string{"debug_note"}) {
 		t.Fatalf("unexpected extra keys: %v", extra)
+	}
+
+	result := map[int]map[string]string{0: rowMap}
+	if err := ExportResultsCSV(result, headers, dir); err != nil {
+		t.Fatalf("ExportResultsCSV error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	if err != nil {
+		t.Fatalf("failed to read csv: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+
+	dataColumns := strings.Split(lines[1], ",")
+	if !reflect.DeepEqual(dataColumns, []string{"Row0", "S1", "", ""}) {
+		t.Fatalf("unexpected export row: %v", dataColumns)
+	}
+	if strings.Contains(lines[1], "tmp") {
+		t.Fatalf("expected extra key to remain absent from export surface, got %q", lines[1])
 	}
 }
 
 // This test verifies the extracted private helper boundary only.
-// It does not introduce warning/report structure or change export semantics.
-func TestCollectMissingAndExtraKeys(t *testing.T) {
-	headers := []string{"Row", "R1", "R2"}
+// It keeps current permissive export semantics fixed without adding diagnostics surfaces.
+func TestCollectMissingAndExtraKeys_CurrentSemantics(t *testing.T) {
+	headers := []string{"R2", "R1", "R3"}
 	rowMap := map[string]string{
-		"Row": "sample1",
-		"R1":  "a.fastq",
-		"X1":  "unexpected.fastq",
+		"R1":    "a.fastq",
+		"R2":    "",
+		"X2":    "z.fastq",
+		"EXTRA": "unexpected.fastq",
 	}
 
 	missing, extra := collectMissingAndExtraKeys(headers, rowMap)
 
-	if !reflect.DeepEqual(missing, []string{"R2"}) {
+	if !reflect.DeepEqual(missing, []string{"R2", "R3"}) {
 		t.Fatalf("unexpected missing keys: %v", missing)
 	}
-	if !reflect.DeepEqual(extra, []string{"X1"}) {
+	if !reflect.DeepEqual(extra, []string{"EXTRA", "X2"}) {
 		t.Fatalf("unexpected extra keys: %v", extra)
 	}
 }
