@@ -6,11 +6,46 @@ run:
 linters:
   default: none
   enable:
+    - depguard
     - govet
+    - misspell
+    - revive
     - staticcheck
     - errcheck
     - ineffassign
     - unused
+  settings:
+    depguard:
+      rules:
+        core_no_service_transport_or_k8s:
+          files:
+            - "config/**/*.go"
+            - "db/**/*.go"
+            - "rules/**/*.go"
+            - "block/**/*.go"
+          deny:
+            - pkg: "github.com/seoyhaein/tori/service"
+              desc: "core baseline packages must not depend on the app service boundary"
+            - pkg: "github.com/seoyhaein/tori/transport/**"
+              desc: "core baseline packages must not depend on transport adapters"
+            - pkg: "k8s.io/**"
+              desc: "core baseline packages must stay Kubernetes-independent in Phase 0/Track A"
+            - pkg: "sigs.k8s.io/**"
+              desc: "core baseline packages must stay controller-runtime-independent in Phase 0/Track A"
+        cmd_no_transport_or_k8s:
+          files:
+            - "cmd/**/*.go"
+          deny:
+            - pkg: "github.com/seoyhaein/tori/transport/**"
+              desc: "cmd should prefer the local/in-process service path instead of transport adapters"
+            - pkg: "k8s.io/**"
+              desc: "cmd should not take a direct Kubernetes dependency in the current baseline"
+            - pkg: "sigs.k8s.io/**"
+              desc: "cmd should not take a direct controller-runtime dependency in the current baseline"
+    revive:
+      rules:
+        - name: comment-spacings
+        - name: import-shadowing
   exclusions:
     generated: lax
 

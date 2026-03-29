@@ -240,7 +240,7 @@ func TestExecSQLTxNoCtx_Success(t *testing.T) {
 	}
 	query := strings.TrimSpace(string(content))
 
-	//mock.ExpectExec(query).WillReturnResult(sqlmock.NewResult(1, 1))
+	// mock.ExpectExec(query).WillReturnResult(sqlmock.NewResult(1, 1))
 	// regexp.QuoteMeta()는 query 에 포함된 모든 특수문자를 이스케이프(escape)해서, 해당 문자열을 정규표현식에서도 리터럴(literal)로 인식하게 만든다.
 	mock.ExpectExec(regexp.QuoteMeta(query)).WillReturnResult(sqlmock.NewResult(1, 1))
 	err = execSQLTxNoCtx(tx, "test_valid.sql")
