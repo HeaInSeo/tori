@@ -17,12 +17,16 @@ linters:
   settings:
     depguard:
       rules:
+        # config/db/rules are the current Track A core baseline.
+        # They should not reach into the app-service, transport, or Kubernetes layers.
         core_no_service_transport_or_k8s:
           files:
+            - "config/*.go"
             - "config/**/*.go"
+            - "db/*.go"
             - "db/**/*.go"
+            - "rules/*.go"
             - "rules/**/*.go"
-            - "block/**/*.go"
           deny:
             - pkg: "github.com/seoyhaein/tori/service"
               desc: "core baseline packages must not depend on the app service boundary"
@@ -32,8 +36,26 @@ linters:
               desc: "core baseline packages must stay Kubernetes-independent in Phase 0/Track A"
             - pkg: "sigs.k8s.io/**"
               desc: "core baseline packages must stay controller-runtime-independent in Phase 0/Track A"
+        # block is still domain-adjacent and may use protoio in the current baseline,
+        # but it should not cross upward into service/transport or outward into Kubernetes imports.
+        block_no_service_transport_or_k8s:
+          files:
+            - "block/*.go"
+            - "block/**/*.go"
+          deny:
+            - pkg: "github.com/seoyhaein/tori/service"
+              desc: "block stays below the app service boundary in the current baseline"
+            - pkg: "github.com/seoyhaein/tori/transport/**"
+              desc: "block must not depend on transport adapters"
+            - pkg: "k8s.io/**"
+              desc: "block must stay Kubernetes-independent in Phase 0/Track A"
+            - pkg: "sigs.k8s.io/**"
+              desc: "block must stay controller-runtime-independent in Phase 0/Track A"
+        # cmd currently uses the local/in-process service path.
+        # Direct transport adapter imports would blur that baseline.
         cmd_no_transport_or_k8s:
           files:
+            - "cmd/*.go"
             - "cmd/**/*.go"
           deny:
             - pkg: "github.com/seoyhaein/tori/transport/**"

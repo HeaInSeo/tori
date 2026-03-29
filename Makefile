@@ -17,7 +17,7 @@ PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: test test-core test-guardrail fmt vet lint lint-security vuln vuln-all golangci-lint govulncheck
+.PHONY: test test-core test-guardrail fmt vet lint lint-depguard lint-security vuln vuln-all golangci-lint govulncheck
 
 test:
 	go test -race ./...
@@ -70,9 +70,13 @@ govulncheck:
 	@mkdir -p "$(LOCALBIN)"
 	@test -x "$(GOVULNCHECK)" || GOBIN="$(LOCALBIN)" go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-lint: golangci-lint
+lint: golangci-lint lint-depguard
 	@mkdir -p "$(REPORT_DIR)"
 	@$(GOLANGCI_LINT) run $(PKGS_LINT) | tee "$(REPORT_DIR)/lint.txt"
+
+lint-depguard: golangci-lint
+	@mkdir -p "$(REPORT_DIR)"
+	@$(GOLANGCI_LINT) run --enable-only depguard $(PKGS_LINT) | tee "$(REPORT_DIR)/lint-depguard.txt"
 
 lint-security: golangci-lint
 	@mkdir -p "$(REPORT_DIR)"

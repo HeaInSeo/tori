@@ -8,6 +8,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func loadMessage(filePath string, message proto.Message) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+	if err := proto.Unmarshal(data, message); err != nil {
+		return fmt.Errorf("failed to unmarshal protobuf message: %w", err)
+	}
+	return nil
+}
+
 // SaveMessage serializes a protobuf message and writes it to disk.
 func SaveMessage(filePath string, message proto.Message, perm os.FileMode) error {
 	data, err := proto.Marshal(message)
@@ -22,14 +33,9 @@ func SaveMessage(filePath string, message proto.Message, perm os.FileMode) error
 
 // LoadDataBlock loads a DataBlock protobuf message from disk.
 func LoadDataBlock(filePath string) (*pb.DataBlock, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
 	db := &pb.DataBlock{}
-	if err := proto.Unmarshal(data, db); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal pb.DataBlock: %w", err)
+	if err := loadMessage(filePath, db); err != nil {
+		return nil, fmt.Errorf("failed to load pb.DataBlock: %w", err)
 	}
 	return db, nil
 }
