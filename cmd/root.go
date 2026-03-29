@@ -69,10 +69,10 @@ func serveCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "gRPC 서버 실행",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			/*ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			/* ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			logger.Info("gRPC 서버 시작 :50053")
-			return api.ServeGRPC(ctx, database)*/
+			return api.ServeGRPC(ctx, database) */
 			return nil
 		},
 	}

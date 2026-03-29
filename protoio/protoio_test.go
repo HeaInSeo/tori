@@ -72,3 +72,26 @@ func TestLoadDataBlockReturnsErrorForInvalidBinary(t *testing.T) {
 		t.Fatalf("expected error for invalid protobuf binary")
 	}
 }
+
+func TestLoadMessageDecodesIntoProvidedProtoMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fileblock.pb")
+	want := &pb.FileBlock{
+		BlockId:       "file-block-1",
+		ColumnHeaders: []string{"R1", "R2"},
+	}
+
+	if err := SaveMessage(path, want, 0o644); err != nil {
+		t.Fatalf("SaveMessage error: %v", err)
+	}
+
+	got := &pb.FileBlock{}
+	if err := loadMessage(path, got); err != nil {
+		t.Fatalf("loadMessage error: %v", err)
+	}
+	if got.GetBlockId() != want.GetBlockId() {
+		t.Fatalf("unexpected block id: %q", got.GetBlockId())
+	}
+	if len(got.GetColumnHeaders()) != 2 || got.GetColumnHeaders()[1] != "R2" {
+		t.Fatalf("unexpected headers: %+v", got.GetColumnHeaders())
+	}
+}

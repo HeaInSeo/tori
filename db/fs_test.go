@@ -176,10 +176,10 @@ func MakeTestFiles(path string) {
 	}
 
 	// 디렉토리 권한을 777로 설정 os.ModePerm 해줌.
-	/*err = os.Chmod(path, 0777) //0o777 이 방식보다 0777 방식 사용
+	/* err = os.Chmod(path, 0777) // 0o777 이 방식보다 0777 방식 사용
 	if err != nil {
 		log.Fatalf("Failed to set permissions for directory %s: %v", path, err)
-	}*/
+	} */
 
 	// 테스트 파일 이름 목록
 
@@ -263,10 +263,10 @@ func MakeTestFilesA(path string) {
 	}
 
 	// 디렉토리 권한을 777로 설정 os.ModePerm 해줌.
-	/*err = os.Chmod(path, 0777) //0o777 이 방식보다 0777 방식 사용
+	/* err = os.Chmod(path, 0777) // 0o777 이 방식보다 0777 방식 사용
 	if err != nil {
 		log.Fatalf("Failed to set permissions for directory %s: %v", path, err)
-	}*/
+	} */
 
 	// 테스트 파일 이름 목록
 

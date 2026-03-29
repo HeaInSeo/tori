@@ -218,7 +218,7 @@ func GetFoldersFromDB(db *sql.DB) (folders []Folder, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query folders: %w", err)
 	}
-	//defer rows.Close()
+	// defer rows.Close()
 	defer func() {
 		if cErr := rows.Close(); cErr != nil {
 			if err == nil {
