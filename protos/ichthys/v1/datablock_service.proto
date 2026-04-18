@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package ichthys;
+
+option go_package = "github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// FileBlock represents one grouped file slice.
+message FileBlock {
+  string block_id = 1;
+  repeated string column_headers = 2;
+  repeated Row rows = 3;
+}
+
+// Row represents one row within a FileBlock.
+message Row {
+  int32 row_number = 1;
+  map<string, string> cells = 2;
+}
+
+// DataBlock is the top-level payload returned by the fetch path.
+message DataBlock {
+  google.protobuf.Timestamp updated_at = 1;
+  repeated FileBlock blocks = 2;
+}
+
+// FetchDataBlockRequest asks for changes after a client timestamp.
+message FetchDataBlockRequest {
+  google.protobuf.Timestamp if_modified_since = 1;
+}
+
+// FetchDataBlockResponse returns either a new DataBlock or a no-update marker.
+message FetchDataBlockResponse {
+  oneof payload {
+    DataBlock data_block = 1;
+    google.protobuf.Empty no_update = 2;
+  }
+}
+
+service DataBlockService {
+  rpc FetchDataBlock(FetchDataBlockRequest) returns (FetchDataBlockResponse);
+}

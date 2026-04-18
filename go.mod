@@ -7,7 +7,6 @@ toolchain go1.24.3
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/mattn/go-sqlite3 v1.14.24
-	github.com/seoyhaein/api-protos/gen/go/datablock/ichthys v1.0.2
 	github.com/seoyhaein/utils v0.0.6
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1

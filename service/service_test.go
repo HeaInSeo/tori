@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
-	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
 	"github.com/seoyhaein/tori/config"
 	d "github.com/seoyhaein/tori/db"
 	"github.com/seoyhaein/tori/protoio"
+	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

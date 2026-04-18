@@ -23,7 +23,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - The next architecture task is not broad transport feature expansion. The current concern is keeping contract ownership, remote surface, and Phase 2 migration order explicit without starting broad import migration too early.
 
 ## Commands
-- `make test-core` runs the core baseline tests and the external `api-protos` import diffusion guardrail.
+- `make test-core` runs the core baseline tests and the external `api-protos` removal guardrail.
 - `make lint`: fail gate for core + cmd scope
 - `make lint-security`: report-only security observation (`sqlclosecheck`, `gosec`) for core scope
 - `make vuln`: report-only vuln scan for core scope
@@ -39,12 +39,14 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
 - [`docs/architecture/transport_boundary.md`](docs/architecture/transport_boundary.md)
 - [`docs/architecture/proto_contract_ownership.md`](docs/architecture/proto_contract_ownership.md)
+- [`docs/architecture/proto_ownership_sprint_plan.md`](docs/architecture/proto_ownership_sprint_plan.md)
 - [`docs/architecture/remote_rpc_surface_decision_note.md`](docs/architecture/remote_rpc_surface_decision_note.md)
 - [`docs/architecture/proto_canonicalization_phase1_note.md`](docs/architecture/proto_canonicalization_phase1_note.md)
 - [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 
 ## Deferred Area (Explicit)
-- Final proto contract ownership is not fixed yet.
-- External `api-protos` usage is still allowed in the current baseline, but it is not yet declared as the final canonical ownership model.
+- Final proto contract ownership is narrowed but not fully closed for all services yet.
+- `tori` active code paths no longer depend on external `api-protos`.
+- `syncfolders` source exists under local proto ownership, but remote RPC exposure remains deferred and local-only.
 - Gateway API / GRPCRoute placement, mesh policy, and full protobuf-neutral service DTO separation remain deferred.

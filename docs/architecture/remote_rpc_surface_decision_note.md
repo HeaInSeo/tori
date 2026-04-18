@@ -68,3 +68,9 @@
 - `SaveFolders`와 `SyncFolders`는 지금은 local-only 또는 deferred로 읽는다.
 - gRPC server bootstrap/lifecycle과 Gateway API / GRPCRoute attachment는 remote contract 자체가 아니라 infra/adapter concern으로 둔다.
 - 따라서 현재는 remote surface를 넓히는 것보다, 좁은 surface를 분명히 유지하는 편이 기준선에 더 맞다.
+
+## Current Status Note
+
+- 현재 active gRPC adapter는 `FetchDataBlock` 경로만 다룬다.
+- `syncfolders` source proto는 local canonical path 아래에 존재하지만, 이것이 remote surface 승격을 의미하지는 않는다.
+- 따라서 source ownership 회수와 remote exposure 결정은 계속 분리해서 읽는다.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
+	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

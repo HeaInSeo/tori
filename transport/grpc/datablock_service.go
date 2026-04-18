@@ -3,7 +3,7 @@ package grpc
 import (
 	"context"
 
-	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
+	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
 	appservice "github.com/seoyhaein/tori/service"
 )
 

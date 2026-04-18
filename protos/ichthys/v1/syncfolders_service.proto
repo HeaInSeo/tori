@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package ichthys;
+
+option go_package = "github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1";
+
+// SyncFoldersRequest triggers folder synchronization.
+message SyncFoldersRequest {
+  bool force = 1;
+}
+
+// SyncFoldersResponse reports whether synchronization changed state.
+message SyncFoldersResponse {
+  bool updated = 1;
+}
+
+service SyncFoldersService {
+  rpc SyncFolders(SyncFoldersRequest) returns (SyncFoldersResponse);
+}

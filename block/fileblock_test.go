@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
 	"github.com/seoyhaein/tori/protoio"
+	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
 	"github.com/seoyhaein/tori/rules"
 )
 

@@ -23,7 +23,7 @@
 - 다음 architecture 과제는 broad transport feature 확장이 아니다. 현재 초점은 `contract ownership`, `remote surface`, `Phase 2 migration order`를 기준선으로 유지하면서 너무 이른 broad import migration을 피하는 것이다.
 
 ## 명령
-- `make test-core`: 코어 baseline 테스트와 external `api-protos` import diffusion guardrail 실행
+- `make test-core`: 코어 baseline 테스트와 external `api-protos` 제거 guardrail 실행
 - `make lint`: 코어+cmd 범위 fail gate
 - `make lint-security`: 코어 범위 보안 관찰(report-only, `sqlclosecheck`/`gosec`)
 - `make vuln`: 코어 범위 취약점 관찰(report-only)
@@ -45,6 +45,7 @@
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 
 ## 보류 영역(명시)
-- 최종 proto contract ownership은 아직 고정되지 않았다.
-- external `api-protos` 사용은 현재 baseline에서 허용되지만, 최종 canonical ownership 모델로 선언된 상태는 아니다.
+- 최종 proto contract ownership은 서비스 전체 기준으로는 아직 완전히 닫히지 않았다.
+- `tori` 의 active code path 는 더 이상 external `api-protos` 에 의존하지 않는다.
+- `syncfolders` source 는 local proto ownership 아래에 있지만, remote RPC 노출은 계속 deferred/local-only 상태다.
 - Gateway API / GRPCRoute 배치, mesh policy, protobuf-neutral service DTO 완전 분리는 계속 보류 범위다.

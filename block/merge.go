@@ -3,8 +3,8 @@ package block
 import (
 	"fmt"
 
-	pb "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
 	"github.com/seoyhaein/tori/protoio"
+	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
 )
 
 // GenerateFBs folderFiles 를 받아서 FileBlock 객체를 생성하고, 바이너리 protobuf 파일로 저장

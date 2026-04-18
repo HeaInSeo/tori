@@ -23,8 +23,9 @@
 
 ## Working Canonical Candidate
 
-- 현재 기준에서 [protos/apis.proto](/opt/go/src/github.com/HeaInSeo/tori/protos/apis.proto)는 local source candidate로 가장 자연스럽다.
-- 다만 이것은 final ownership 확정이 아니라, Phase 1에서 준비 대상으로 다루는 working canonical candidate다.
+- 현재 기준에서 `datablock`/`syncfolders` source proto는 [protos/ichthys/v1](/opt/go/src/github.com/HeaInSeo/tori/protos/ichthys/v1:1) 아래 local canonical path로 이동했다.
+- 이전 `protos/apis.proto` 후보는 legacy duplicate 였고, 현재는 tombstone 단계를 지나 제거된 상태다.
+- 다만 이것이 서비스 전체 ownership final decision 을 모두 닫았다는 뜻은 아니고, `tori` 내부 canonicalization 기준선이 먼저 고정된 상태로 읽는다.
 
 ## Promotion Conditions
 
@@ -49,13 +50,13 @@ local source candidate를 working canonical candidate로 더 밀어 올리려면
 
 ## Exit Criteria
 
-- `protos/apis.proto`를 working canonical candidate로 다루는 이유를 문서상 더 일관되게 설명할 수 있어야 한다.
+- local canonical path를 `protos/ichthys/v1` 기준으로 일관되게 설명할 수 있어야 한다.
 - source ownership 설명과 generated/import 현실 설명이 분리되어 있어야 한다.
 - Phase 2가 다룰 일과 아직 다루지 않을 일이 구분되어 있어야 한다.
 
 ## Current Working Conclusion
 
 - Phase 1은 canonical source 선언 단계가 아니라 canonicalization 준비 단계다.
-- `protos/apis.proto`는 가장 자연스러운 local source candidate이지만 final ownership 확정은 아니다.
+- `tori` 의 current local canonical source 는 `protos/ichthys/v1` 이다.
 - generated code path 정리, import rewrite, 재생성은 아직 Phase 2로 둔다.
 - `service` protobuf 반환 제거, remote surface 확장, bootstrap/ingress/Gateway API 문제는 이번 note 범위 밖이다.
