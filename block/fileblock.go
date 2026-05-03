@@ -53,7 +53,7 @@ func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
 
 	// 9. FileBlock → 바이너리 protobuf 파일로 저장
 	outPath := filepath.Join(dirPath, filepath.Base(dirPath)+"files.pb")
-	if err := protoio.SaveMessage(outPath, fb, 0o777); err != nil {
+	if err := protoio.SaveMessage(outPath, fb, 0o644); err != nil {
 		return nil, fmt.Errorf("SaveMessage error: %w", err)
 	}
 
@@ -94,7 +94,7 @@ func GenerateFileBlock(filePath string, files []string) (*pb.FileBlock, error) {
 	// blockId 를 filePath 로 잡아둠.
 	fbd := ConvertMapToFileBlock(validRows, ruleSet.Header, filePath)
 	pbName := filepath.Join(filePath, fmt.Sprintf("%sfiles.pb", filepath.Base(filePath)))
-	err = protoio.SaveMessage(pbName, fbd, 0777)
+	err = protoio.SaveMessage(pbName, fbd, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save proto message: %w", err)
 	}

@@ -220,14 +220,14 @@ func FilterGroups(resultMap map[int]map[string]string, expectedColCount int) (ma
 // WriteInvalidFiles invalid 행의 모든 파일명을 <outputDir>/invalid_files_YYYYMMDDhhmmss.txt 로 기록
 
 // SaveInvalidFiles invalid 행의 모든 파일명을 <outputDir>/invalid_files_YYYYMMDDhhmmss.txt 로 기록
-func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) error {
+func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) (err error) {
 	if len(invalidRows) == 0 {
 		return nil
 	}
 
-	info, err := os.Stat(outputDir)
-	if err != nil {
-		return fmt.Errorf("failed to stat outputDir %s: %w", outputDir, err)
+	info, statErr := os.Stat(outputDir)
+	if statErr != nil {
+		return fmt.Errorf("failed to stat outputDir %s: %w", outputDir, statErr)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("output path is not a directory: %s", outputDir)
@@ -235,9 +235,9 @@ func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) error {
 
 	ts := time.Now().Format("20060102150405")
 	outFile := filepath.Join(outputDir, fmt.Sprintf("invalid_files_%s.txt", ts))
-	f, err := os.Create(outFile)
-	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", outFile, err)
+	f, createErr := os.Create(outFile)
+	if createErr != nil {
+		return fmt.Errorf("failed to create %s: %w", outFile, createErr)
 	}
 	defer func() {
 		if errClose := f.Close(); errClose != nil && err == nil {
@@ -247,12 +247,13 @@ func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) error {
 
 	for _, row := range invalidRows {
 		for _, fn := range row {
-			if _, wErr := f.WriteString(fn + "\n"); wErr != nil && err == nil {
+			if _, wErr := f.WriteString(fn + "\n"); wErr != nil {
 				err = fmt.Errorf("failed to write to %s: %w", outFile, wErr)
+				return err
 			}
 		}
 	}
-	return err
+	return nil
 }
 
 // ValidateRuleSet 중복 인덱스 사용 여부 등을 점검
@@ -345,24 +346,24 @@ func collectMissingAndExtraKeys(headers []string, rowMap map[string]string) (mis
 }
 
 // ExportResultsCSV validRows(map[int]map[string]string) + headers → CSV 파일로 저장
-func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, outputDir string) error {
-	path, err := utils.CheckPath(outputDir)
-	if err != nil {
-		return err
+func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, outputDir string) (err error) {
+	path, checkErr := utils.CheckPath(outputDir)
+	if checkErr != nil {
+		return checkErr
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to stat %s: %w", path, err)
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		return fmt.Errorf("failed to stat %s: %w", path, statErr)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("output path is not a directory: %s", path)
 	}
 
 	csvFile := filepath.Join(path, "fileblock.csv")
-	f, err := os.Create(csvFile)
-	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", csvFile, err)
+	f, createErr := os.Create(csvFile)
+	if createErr != nil {
+		return fmt.Errorf("failed to create %s: %w", csvFile, createErr)
 	}
 	defer func() {
 		if cerr := f.Close(); cerr != nil && err == nil {

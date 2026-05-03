@@ -41,7 +41,7 @@ func GenerateDataBlock(inputBlocks []*pb.FileBlock, outputFile string) error {
 	}
 
 	// DataBlock 저장
-	if err := protoio.SaveMessage(outputFile, dataBlock, 0o777); err != nil {
+	if err := protoio.SaveMessage(outputFile, dataBlock, 0o644); err != nil {
 		return fmt.Errorf("failed to save DataBlock: %w", err)
 	}
 
