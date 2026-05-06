@@ -227,6 +227,18 @@ func CompareFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusi
 	return unchanged, diskFolders, diffs, nil
 }
 
+// normalizeTimeStr는 go-sqlite3 드라이버가 DATETIME 컬럼을 RFC3339("T"/"Z" 포함)로
+// 반환하는 경우에 대비해 "YYYY-MM-DD HH:MM:SS" 형식으로 정규화함.
+func normalizeTimeStr(s string) string {
+	if len(s) > 19 {
+		s = s[:19]
+	}
+	if len(s) == 19 && s[10] == 'T' {
+		s = s[:10] + " " + s[11:]
+	}
+	return s
+}
+
 // CompareFiles  파일 비교.
 func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool, []File, []FileChange, error) {
 	// 디스크의 파일 정보 조회
@@ -265,16 +277,17 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 				Path:        diskF.Path,
 			})
 		} else {
-			// 파일 이름은 동일하지만 크기가 다른 경우 (수정된 파일)
-			if diskF.Size != dbF.Size {
+			// size 또는 mtime 이 다른 경우 수정으로 판단 (mtime은 포맷 정규화 후 비교)
+			if diskF.Size != dbF.Size || normalizeTimeStr(diskF.CreatedTime) != normalizeTimeStr(dbF.CreatedTime) {
 				changes = append(changes, FileChange{
-					ChangeType: "modified",
-					FileID:     dbF.ID,
-					FolderID:   dbF.FolderID,
-					Name:       name,
-					DiskSize:   diskF.Size,
-					DBSize:     dbF.Size,
-					Path:       diskF.Path,
+					ChangeType:  "modified",
+					FileID:      dbF.ID,
+					FolderID:    dbF.FolderID,
+					Name:        name,
+					CreatedTime: diskF.CreatedTime,
+					DiskSize:    diskF.Size,
+					DBSize:      dbF.Size,
+					Path:        diskF.Path,
 				})
 			}
 		}

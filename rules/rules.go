@@ -130,7 +130,7 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 		// 1) Row 키 생성
 		var rowKeyParts []string
 		for _, idx := range ruleSet.RowRules.MatchParts {
-			if idx < len(parts) {
+			if idx >= 0 && idx < len(parts) {
 				rowKeyParts = append(rowKeyParts, parts[idx])
 			}
 		}
@@ -146,7 +146,7 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 		// 2) Column 키 생성
 		var colKeyParts []string
 		for _, idx := range ruleSet.ColumnRules.MatchParts {
-			if idx < len(parts) {
+			if idx >= 0 && idx < len(parts) {
 				colKeyParts = append(colKeyParts, parts[idx])
 			}
 		}
@@ -200,14 +200,48 @@ func appendUniqueString(items []string, value string) []string {
 // FilterMap 각 Row에 컬럼 수가 expectedColCount와 같은 행만 valid, 나머지는 invalid로 분리
 // // expectedColCount 와 일치하는 그룹은 valid에, 그렇지 않으면 invalid에 담아 반환
 
-// FilterGroups GroupFiles 로 묶인 결과에서 expectedColCount 와 일치하는 그룹은 valid 에, 그렇지 않으면 invalid 에 담아 반환
+// FilterGroups GroupFiles 로 묶인 결과에서 expectedColCount 와 일치하는 그룹은 valid 에, 그렇지 않으면 invalid 에 담아 반환.
+// 입력 맵의 키를 오름차순으로 정렬하여 처리 순서를 결정적으로 유지함.
 func FilterGroups(resultMap map[int]map[string]string, expectedColCount int) (map[int]map[string]string, []map[string]string) {
 	valid := make(map[int]map[string]string)
 	invalid := make([]map[string]string, 0)
 	nextRowIdx := 0
 
-	for _, row := range resultMap {
+	keys := make([]int, 0, len(resultMap))
+	for k := range resultMap {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	for _, k := range keys {
+		row := resultMap[k]
 		if len(row) == expectedColCount {
+			valid[nextRowIdx] = row
+			nextRowIdx++
+		} else {
+			invalid = append(invalid, row)
+		}
+	}
+	return valid, invalid
+}
+
+// FilterGroupsByHeaders GroupFiles 로 묶인 결과에서 headers 의 키와 정확히 일치하는 그룹만 valid 로 분류.
+// column 수뿐 아니라 missing/extra key 도 검사하므로 FilterGroups 보다 엄격함.
+func FilterGroupsByHeaders(resultMap map[int]map[string]string, headers []string) (map[int]map[string]string, []map[string]string) {
+	valid := make(map[int]map[string]string)
+	invalid := make([]map[string]string, 0)
+	nextRowIdx := 0
+
+	keys := make([]int, 0, len(resultMap))
+	for k := range resultMap {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	for _, k := range keys {
+		row := resultMap[k]
+		missing, extra := collectMissingAndExtraKeys(headers, row)
+		if len(missing) == 0 && len(extra) == 0 {
 			valid[nextRowIdx] = row
 			nextRowIdx++
 		} else {
@@ -271,6 +305,11 @@ func IsValidRuleSet(ruleSet RuleSet) bool {
 
 	hasConflict := false
 	for idx, roles := range usage {
+		if idx < 0 {
+			logger.Infof("Negative index detected: %d", idx)
+			hasConflict = true
+			continue
+		}
 		if len(roles) > 1 {
 			logger.Infof("Conflict detected: part %d used for %v", idx, roles)
 			hasConflict = true

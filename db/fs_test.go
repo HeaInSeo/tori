@@ -138,13 +138,18 @@ func TestCompareFilesMatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(folder, "f1.txt"), []byte("abc"), 0644); err != nil {
 		t.Fatalf("write f1.txt: %v", err)
 	}
-	// insert folder and file in DB
+	// insert folder and file in DB — created_time must match disk mtime for no-change detection
 	res, err := db.Exec("INSERT INTO folders(path,total_size,file_count) VALUES(?,?,?)", folder, int64(3), int64(1))
 	if err != nil {
 		t.Fatalf("insert folder: %v", err)
 	}
 	fid, _ := res.LastInsertId()
-	_, err = db.Exec("INSERT INTO files(folder_id,name,size) VALUES(?,?,?)", fid, "f1.txt", int64(3))
+	info, err := os.Stat(filepath.Join(folder, "f1.txt"))
+	if err != nil {
+		t.Fatalf("stat f1.txt: %v", err)
+	}
+	mtime := info.ModTime().Format("2006-01-02 15:04:05")
+	_, err = db.Exec("INSERT INTO files(folder_id,name,size,created_time) VALUES(?,?,?,?)", fid, "f1.txt", int64(3), mtime)
 	if err != nil {
 		t.Fatalf("insert file: %v", err)
 	}

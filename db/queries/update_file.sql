@@ -1,3 +1,3 @@
 UPDATE files
-SET size = ?
+SET size = ?, created_time = ?
 WHERE id = ?;

@@ -257,6 +257,56 @@ func TestIsValidRuleSet(t *testing.T) {
 	}
 }
 
+func TestIsValidRuleSet_NegativeIndex(t *testing.T) {
+	rs := RuleSet{
+		RowRules:    RowRules{MatchParts: []int{-1, 0}},
+		ColumnRules: ColumnRules{MatchParts: []int{1}},
+	}
+	if IsValidRuleSet(rs) {
+		t.Errorf("expected rule set to be invalid due to negative index")
+	}
+}
+
+func TestFilterGroups_Deterministic(t *testing.T) {
+	resultMap := map[int]map[string]string{
+		0: {"R1": "f0-r1", "R2": "f0-r2"},
+		1: {"R1": "f1-r1"},
+		2: {"R1": "f2-r1", "R2": "f2-r2"},
+		3: {"R1": "f3-r1"},
+	}
+	for range 20 {
+		valid, invalid := FilterGroups(resultMap, 2)
+		if len(valid) != 2 || len(invalid) != 2 {
+			t.Fatalf("unexpected counts: valid=%d invalid=%d", len(valid), len(invalid))
+		}
+		if valid[0]["R1"] != "f0-r1" || valid[1]["R1"] != "f2-r1" {
+			t.Fatalf("non-deterministic valid ordering: %v", valid)
+		}
+	}
+}
+
+func TestFilterGroupsByHeaders_ExactMatch(t *testing.T) {
+	resultMap := map[int]map[string]string{
+		0: {"R1": "f0-r1", "R2": "f0-r2"},
+		1: {"R1": "f1-r1", "R3": "f1-r3"},
+		2: {"R1": "f2-r1", "R2": "f2-r2"},
+	}
+	headers := []string{"R1", "R2"}
+	valid, invalid := FilterGroupsByHeaders(resultMap, headers)
+	if len(valid) != 2 {
+		t.Fatalf("expected 2 valid, got %d", len(valid))
+	}
+	if len(invalid) != 1 {
+		t.Fatalf("expected 1 invalid, got %d", len(invalid))
+	}
+	if valid[0]["R1"] != "f0-r1" || valid[1]["R1"] != "f2-r1" {
+		t.Fatalf("unexpected valid ordering: %v", valid)
+	}
+	if invalid[0]["R3"] != "f1-r3" {
+		t.Fatalf("unexpected invalid row: %v", invalid)
+	}
+}
+
 func TestListFilesExclude(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0644); err != nil {

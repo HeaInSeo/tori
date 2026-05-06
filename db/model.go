@@ -86,7 +86,7 @@ func (fc *FileChange) UpsertDelFile(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("failed to insert file %s: %w", fc.Name, err)
 		}
 	case "modified":
-		if err := execSQL(ctx, db, "update_file.sql", fc.DiskSize, fc.FileID); err != nil {
+		if err := execSQL(ctx, db, "update_file.sql", fc.DiskSize, fc.CreatedTime, fc.FileID); err != nil {
 			return fmt.Errorf("failed to update file %s: %w", fc.Name, err)
 		}
 	case "removed":
