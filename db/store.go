@@ -35,7 +35,11 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 		return err
 	}
 	// UpsertFolders 해줘야지만, db 에 folderId 가 생겨서 검색할 수 가 있음.
+	// removed 파일은 Path == "" 이고 FolderID 가 이미 DB 에서 채워져 있으므로 건너뜀.
 	for i := range changes {
+		if changes[i].ChangeType == "removed" {
+			continue
+		}
 		folderId, err := getFolderID(db, changes[i].Path)
 		if err != nil {
 			return fmt.Errorf("failed to get folder ID for path %q: %w", changes[i].Path, err)

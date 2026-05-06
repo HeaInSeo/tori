@@ -13,7 +13,7 @@ func setupChangeFS(t *testing.T) {
 	t.Helper()
 	old := sqlFiles
 	sqlFiles = fstest.MapFS{
-		"queries/insert_file.sql": &fstest.MapFile{Data: []byte("INSERT INTO files VALUES (?,?,?)")},
+		"queries/insert_file.sql": &fstest.MapFile{Data: []byte("INSERT INTO files VALUES (?,?,?,?)")},
 		"queries/update_file.sql": &fstest.MapFile{Data: []byte("UPDATE files SET size=? WHERE id=?")},
 		"queries/delete_file.sql": &fstest.MapFile{Data: []byte("DELETE FROM files WHERE id=?")},
 	}
@@ -26,9 +26,9 @@ func TestUpsertDelFile_Added(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
 	}
-	query := "INSERT INTO files VALUES (?,?,?)"
-	mock.ExpectExec(regexp.QuoteMeta(query)).WithArgs(int64(1), "a", int64(10)).WillReturnResult(sqlmock.NewResult(1, 1))
-	fc := FileChange{ChangeType: "added", FolderID: 1, Name: "a", DiskSize: 10}
+	query := "INSERT INTO files VALUES (?,?,?,?)"
+	mock.ExpectExec(regexp.QuoteMeta(query)).WithArgs(int64(1), "a", int64(10), "2026-01-01 00:00:00").WillReturnResult(sqlmock.NewResult(1, 1))
+	fc := FileChange{ChangeType: "added", FolderID: 1, Name: "a", DiskSize: 10, CreatedTime: "2026-01-01 00:00:00"}
 	if err := fc.UpsertDelFile(context.Background(), db); err != nil {
 		t.Fatalf("UpsertDelFile error: %v", err)
 	}
@@ -89,12 +89,12 @@ func TestUpsertDelFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock new: %v", err)
 	}
-	q1 := "INSERT INTO files VALUES (?,?,?)"
+	q1 := "INSERT INTO files VALUES (?,?,?,?)"
 	q2 := "UPDATE files SET size=? WHERE id=?"
-	mock.ExpectExec(regexp.QuoteMeta(q1)).WithArgs(int64(1), "a", int64(10)).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(q1)).WithArgs(int64(1), "a", int64(10), "2026-01-01 00:00:00").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(q2)).WithArgs(int64(5), int64(2)).WillReturnResult(sqlmock.NewResult(1, 1))
 	changes := []FileChange{
-		{ChangeType: "added", FolderID: 1, Name: "a", DiskSize: 10},
+		{ChangeType: "added", FolderID: 1, Name: "a", DiskSize: 10, CreatedTime: "2026-01-01 00:00:00"},
 		{ChangeType: "modified", DiskSize: 5, FileID: 2},
 	}
 	if err := UpsertDelFiles(context.Background(), db, changes); err != nil {

@@ -3,6 +3,9 @@
 # - exact pinned version: v2.11.3
 # - local binary only: ./bin/golangci-lint
 
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
 LOCALBIN := $(CURDIR)/bin
 REPORT_DIR := $(CURDIR)/reports
 

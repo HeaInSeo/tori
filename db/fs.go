@@ -182,10 +182,11 @@ func CompareFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusi
 
 		if dbFolder, ok := dbFolderMap[diskFolder.Path]; !ok {
 			// DB에 해당 폴더 정보가 없는 경우 FolderID를 0으로 처리
-
 			diffs = append(diffs, FolderDiff{
+				ChangeType:    "added",
 				FolderID:      0,
 				Path:          diskFolder.Path,
+				CreatedTime:   diskFolder.CreatedTime,
 				DiskTotalSize: updatedFolder.TotalSize,
 				DBTotalSize:   0,
 				DiskFileCount: updatedFolder.FileCount,
@@ -195,6 +196,7 @@ func CompareFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusi
 			// DB에 해당 폴더 정보가 있는 경우
 			if updatedFolder.TotalSize != dbFolder.TotalSize || updatedFolder.FileCount != dbFolder.FileCount {
 				diffs = append(diffs, FolderDiff{
+					ChangeType:    "modified",
 					FolderID:      dbFolder.ID,
 					Path:          diskFolder.Path,
 					DiskTotalSize: updatedFolder.TotalSize,
@@ -202,8 +204,22 @@ func CompareFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusi
 					DiskFileCount: updatedFolder.FileCount,
 					DBFileCount:   dbFolder.FileCount,
 				})
-
 			}
+		}
+	}
+
+	// DB에만 있고 디스크에서 사라진 폴더를 감지
+	diskFolderSet := make(map[string]struct{}, len(diskFolders))
+	for _, f := range diskFolders {
+		diskFolderSet[f.Path] = struct{}{}
+	}
+	for _, dbFolder := range dbFolders {
+		if _, ok := diskFolderSet[dbFolder.Path]; !ok {
+			diffs = append(diffs, FolderDiff{
+				ChangeType: "removed",
+				FolderID:   dbFolder.ID,
+				Path:       dbFolder.Path,
+			})
 		}
 	}
 
@@ -239,13 +255,14 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 	for name, diskF := range diskMap {
 		if dbF, ok := dbMap[name]; !ok {
 			changes = append(changes, FileChange{
-				ChangeType: "added",
-				FileID:     0,              // 신규 추가이므로 ID 없음
-				FolderID:   diskF.FolderID, // 폴더 정보는 디스크 정보에서 가져옴 (또는 상위 로직에서 결정)
-				Name:       name,
-				DiskSize:   diskF.Size,
-				DBSize:     0,
-				Path:       diskF.Path,
+				ChangeType:  "added",
+				FileID:      0,
+				FolderID:    diskF.FolderID,
+				Name:        name,
+				CreatedTime: diskF.CreatedTime,
+				DiskSize:    diskF.Size,
+				DBSize:      0,
+				Path:        diskF.Path,
 			})
 		} else {
 			// 파일 이름은 동일하지만 크기가 다른 경우 (수정된 파일)
