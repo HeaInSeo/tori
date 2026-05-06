@@ -94,7 +94,7 @@ func SaveDataBlockToTextFile(filePath string, data *pb.DataBlock) error {
 	}
 
 	// 텍스트 데이터를 파일에 저장
-	if err := os.WriteFile(filePath, textData, os.ModePerm); err != nil {
+	if err := os.WriteFile(filePath, textData, 0o644); err != nil {
 		return fmt.Errorf("failed to write to file %s: %w", filePath, err)
 	}
 

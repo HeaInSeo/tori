@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	cfg      = c.GlobalConfig
+	cfg      *c.Config
 	logger   = globallog.Log
 	database *sql.DB
 	appSvc   service.DataBlockService
@@ -30,6 +30,11 @@ func Execute() error {
 		Use:   "tori-admin",
 		Short: "관리자용 CLI for Tori service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := c.InitConfig(); err != nil {
+				return fmt.Errorf("config 로드 실패: %w", err)
+			}
+			cfg = c.GlobalConfig
+
 			var err error
 			database, err = dbUtils.ConnectDB("sqlite3", "file_monitor.db", true)
 			if err != nil {
@@ -38,7 +43,6 @@ func Execute() error {
 			if err := dbUtils.InitializeDatabase(database); err != nil {
 				return fmt.Errorf("DB 초기화 실패: %w", err)
 			}
-			// cfg 는 config.go 에서 init 에서 생성됨.
 			appSvc = service.NewDataBlockCliService(database, cfg)
 			return nil
 		},

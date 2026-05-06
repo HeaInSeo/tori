@@ -21,25 +21,19 @@ var (
 	logger       = globallog.Log
 )
 
-func init() {
-	wd, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("failed to get working directory: %v\n", err)
-	} else {
-		fmt.Printf("Current working directory: %s\n", wd)
-	}
-
-	// config 설정 TODO 추후 배포시에 설정해줘야 함.
+// InitConfig loads the configuration from CONFIG_FILE env or the default path
+// and assigns it to GlobalConfig. Must be called explicitly before use.
+func InitConfig() error {
 	cfgFile := os.Getenv("CONFIG_FILE")
 	if cfgFile == "" {
 		cfgFile = defaultConfigPath()
 	}
 	config, err := LoadConfig(cfgFile)
-	// Important 기억하자. os.Exit(1) 로만 하지 말고 Log.Fatalf 를 써서 오류 사항을 명확히 하자. 자체적으로 os.Exit(1) 처리됨.
 	if err != nil {
-		logger.Fatalf("failed to load config file %v", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 	GlobalConfig = config
+	return nil
 }
 
 func LoadConfig(filename string) (cfg *Config, err error) {
