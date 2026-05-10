@@ -154,8 +154,8 @@ func GetCurrentFolderFileInfo(dirPath string, exclusions []string) (Folder, []Fi
 
 // CompareFolders 디스크와 DB의 폴더 정보를 비교하여 변경 사항이 있는지 확인함.
 func CompareFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusions []string) (bool, []Folder, []FolderDiff, error) {
-	// 디스크에서 서브 폴더 목록 조회
-	diskFolders, err := GetFoldersInfo(rootPath, foldersExclusions)
+	// 디스크에서 서브 폴더 목록 조회 (통계는 아래 루프에서 filesExclusions 기준으로 한 번만 계산)
+	diskFolders, err := GetSubFolders(rootPath, foldersExclusions)
 	if err != nil {
 		return false, nil, nil, fmt.Errorf("failed to get subfolders from disk: %w", err)
 	}

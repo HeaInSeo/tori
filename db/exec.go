@@ -99,6 +99,19 @@ func querySQLNoCtx(db *sql.DB, fileName string, args ...interface{}) (*sql.Rows,
 	return querySQL(context.Background(), db, fileName, args...)
 }
 
+// loadSQL reads a SQL file from the embedded FS and returns the trimmed query string.
+func loadSQL(fileName string) (string, error) {
+	content, err := fs.ReadFile(sqlFiles, "queries/"+fileName)
+	if err != nil {
+		return "", fmt.Errorf("failed to read SQL file (%s): %w", fileName, err)
+	}
+	query := strings.TrimSpace(string(content))
+	if query == "" {
+		return "", fmt.Errorf("SQL file (%s) is empty", fileName)
+	}
+	return query, nil
+}
+
 // CheckForeignKeysEnabled DB 연결에서 외래 키가 활성화되었는지 확인함.
 // IMPORTANT: fk 값이 1이면 외래 키가 활성화된 상태임.
 func CheckForeignKeysEnabled(db *sql.DB) (bool, error) {

@@ -36,14 +36,21 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 	}
 	// UpsertFolders 해줘야지만, db 에 folderId 가 생겨서 검색할 수 가 있음.
 	// removed 파일은 Path == "" 이고 FolderID 가 이미 DB 에서 채워져 있으므로 건너뜀.
+	// 같은 폴더에 속한 파일이 여럿일 때 getFolderID 쿼리가 중복 실행되지 않도록 캐싱.
+	folderIDCache := make(map[string]int64)
 	for i := range changes {
 		if changes[i].ChangeType == "removed" {
+			continue
+		}
+		if id, ok := folderIDCache[changes[i].Path]; ok {
+			changes[i].FolderID = id
 			continue
 		}
 		folderId, err := getFolderID(db, changes[i].Path)
 		if err != nil {
 			return fmt.Errorf("failed to get folder ID for path %q: %w", changes[i].Path, err)
 		}
+		folderIDCache[changes[i].Path] = folderId
 		changes[i].FolderID = folderId
 	}
 	// 파일 변경 업데이트,
@@ -132,14 +139,25 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 		return fmt.Errorf("failed to query folder ID: %w", err)
 	}
 
-	// 파일 정보 삽입 (insert_file.sql)
+	// 파일 정보 삽입 (insert_file.sql) — SQL을 한 번 준비하고 루프에서 재사용
+	insertFileSQL, err := loadSQL("insert_file.sql")
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Infof("rollback failed: %v", rbErr)
+		}
+		return fmt.Errorf("failed to load insert_file.sql: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, insertFileSQL)
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Infof("rollback failed: %v", rbErr)
+		}
+		return fmt.Errorf("failed to prepare insert_file statement: %w", err)
+	}
+	defer stmt.Close()
+
 	for _, file := range fileDetails {
-		err = execSQLTx(ctx, tx, "insert_file.sql",
-			folderID,
-			file.Name,
-			file.Size,
-			file.CreatedTime)
-		if err != nil {
+		if _, err = stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime); err != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 				logger.Infof("rollback failed: %v", rbErr)
 			}
