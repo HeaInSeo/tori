@@ -154,7 +154,11 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 		}
 		return fmt.Errorf("failed to prepare insert_file statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() {
+		if closeErr := stmt.Close(); closeErr != nil {
+			logger.Warnf("failed to close insert_file statement: %v", closeErr)
+		}
+	}()
 
 	for _, file := range fileDetails {
 		if _, err = stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime); err != nil {
