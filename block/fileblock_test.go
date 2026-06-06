@@ -53,6 +53,45 @@ func TestGenerateFileBlock_PreservesDuplicateCollisionTypedError(t *testing.T) {
 	}
 }
 
+func TestGenerateFileBlock_UsesHeaderExactValidationForMissingExtraRoles(t *testing.T) {
+	dir := t.TempDir()
+	ruleSet := rules.RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{3}},
+	}
+
+	data, err := json.Marshal(ruleSet)
+	if err != nil {
+		t.Fatalf("marshal rule set: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1_S1_L001_EXTRA_001.fastq.gz",
+	}
+
+	fb, err := GenerateFileBlock(dir, files)
+	if err != nil {
+		t.Fatalf("GenerateFileBlock error: %v", err)
+	}
+	if len(fb.GetRows()) != 0 {
+		t.Fatalf("expected missing/extra role row to be excluded from FileBlock rows, got %d rows", len(fb.GetRows()))
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, "invalid_files_*.txt"))
+	if err != nil {
+		t.Fatalf("glob invalid files: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one invalid files report, got %d", len(matches))
+	}
+}
+
 func TestGenerateDataBlock_WritesMergedDataBlock(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "datablock.pb")
 	input := []*pb.FileBlock{

@@ -299,6 +299,15 @@ Phase 0 이후 바로 Phase A-1 Current Semantics Freeze 로 들어갈 수 있�
   - `block/fileblock.go`: `GenerateFileBlock` (rules 결과를 FileBlock/proto 저장으로 연결)
 - fixture 추가 가능 위치
   - `rules/` 하위 테스트 인접 경로(`rules/fixtures/` 또는 `rules/testdata/`)가 가장 작은 도입 지점
+  - 저장소 내부 fixture는 current semantics freeze용 소형 anchor로 유지한다.
+  - 실제 다양한 유전체 파일 기반 검증은 NAS fixture pack을 기준으로 한다.
+    - NAS root: `/mnt/genomics-test/tori-public-fixtures`
+    - provenance/checksum: `/mnt/genomics-test/tori-public-fixtures/metadata/fixture_manifest.md`, `/mnt/genomics-test/tori-public-fixtures/metadata/SHA256SUMS.txt`
+    - fixture 축: organism diversity, sequencing platform diversity, sequencing/analysis stage diversity
+    - genomics fixture 파일은 로컬 개발 장비나 원격 테스트 장비 저장소에 복사하지 않는다.
+  - coverage/run reports는 저장소 문서로 유지한다.
+    - `docs/nas_fixture_test_coverage_report_v0.1.md`
+    - `docs/nas_fixture_run_results_v0.1.md`
 - golden/snapshot test 가능 위치
   - `rules/rules_test.go` 확장 또는 `rules/snapshot_test.go` 분리
   - CSV/invalid 출력 고정은 `testdata` 기반 비교가 적합

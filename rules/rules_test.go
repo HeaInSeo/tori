@@ -247,6 +247,657 @@ func TestGroupFiles_NoDuplicateKeepsNormalBehavior(t *testing.T) {
 	}
 }
 
+func TestNormalizeRoleKey_UsesRuleSetMapWithoutChangingObservedKeySemantics(t *testing.T) {
+	rs := RuleSet{
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	got, found := NormalizeRoleKey("bam", rs)
+	if !found || got != "BAM" {
+		t.Fatalf("expected bam to normalize to BAM, got=%q found=%v", got, found)
+	}
+
+	got, found = NormalizeRoleKey("bam_bai", rs)
+	if !found || got != "BAI" {
+		t.Fatalf("expected bam_bai to normalize to BAI, got=%q found=%v", got, found)
+	}
+
+	got, found = NormalizeRoleKey("unknown", rs)
+	if found || got != "" {
+		t.Fatalf("expected unknown key to remain unresolved, got=%q found=%v", got, found)
+	}
+}
+
+func TestNormalizeRoleKey_MissingMapLeavesObservedKeyUnresolved(t *testing.T) {
+	got, found := NormalizeRoleKey("R1", RuleSet{})
+	if found || got != "" {
+		t.Fatalf("expected missing normalization map to leave key unresolved, got=%q found=%v", got, found)
+	}
+}
+
+func TestBuildRoleNormalizationPreview_DoesNotRewriteRowMap(t *testing.T) {
+	rs := RuleSet{
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+	rowMap := map[string]string{
+		"bam_bai": "NA12878_chr21_1x.bam.bai",
+		"bam":     "NA12878_chr21_1x.bam",
+		"debug":   "debug.txt",
+	}
+
+	got := BuildRoleNormalizationPreview(rowMap, rs)
+	want := []RoleNormalizationPreviewEntry{
+		{
+			ObservedKey:    "bam",
+			NormalizedRole: "BAM",
+			Resolved:       true,
+			FileName:       "NA12878_chr21_1x.bam",
+		},
+		{
+			ObservedKey:    "bam_bai",
+			NormalizedRole: "BAI",
+			Resolved:       true,
+			FileName:       "NA12878_chr21_1x.bam.bai",
+		},
+		{
+			ObservedKey:    "debug",
+			NormalizedRole: "",
+			Resolved:       false,
+			FileName:       "debug.txt",
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected normalization preview: got=%#v want=%#v", got, want)
+	}
+	if rowMap["bam"] != "NA12878_chr21_1x.bam" || rowMap["bam_bai"] != "NA12878_chr21_1x.bam.bai" {
+		t.Fatalf("expected observed-key row map to remain unchanged: %#v", rowMap)
+	}
+}
+
+func TestBuildRowPreview_ContainsObservedRolesAndNormalizationPreview(t *testing.T) {
+	rs := RuleSet{
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+	rowMap := map[string]string{
+		"bam_bai": "NA12878_chr21_1x.bam.bai",
+		"bam":     "NA12878_chr21_1x.bam",
+	}
+
+	got := BuildRowPreview(7, rowMap, rs)
+	if got.RowIndex != 7 {
+		t.Fatalf("unexpected row index: %d", got.RowIndex)
+	}
+	if !reflect.DeepEqual(got.ObservedRoles, []string{"bam", "bam_bai"}) {
+		t.Fatalf("unexpected observed roles: %v", got.ObservedRoles)
+	}
+	if len(got.RoleNormalization) != 2 {
+		t.Fatalf("expected 2 normalization entries, got %d", len(got.RoleNormalization))
+	}
+	if got.RoleNormalization[0].ObservedKey != "bam" || got.RoleNormalization[0].NormalizedRole != "BAM" {
+		t.Fatalf("unexpected first normalization entry: %#v", got.RoleNormalization[0])
+	}
+	if got.RoleNormalization[1].ObservedKey != "bam_bai" || got.RoleNormalization[1].NormalizedRole != "BAI" {
+		t.Fatalf("unexpected second normalization entry: %#v", got.RoleNormalization[1])
+	}
+	if _, ok := rowMap["BAM"]; ok {
+		t.Fatalf("expected row preview not to rewrite row map: %#v", rowMap)
+	}
+}
+
+func TestBuildResolverPreview_DeterministicRowOrdering(t *testing.T) {
+	rs := RuleSet{
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+	resultMap := map[int]map[string]string{
+		2: {
+			"bam": "second.bam",
+		},
+		0: {
+			"bam_bai": "first.bam.bai",
+			"bam":     "first.bam",
+		},
+	}
+
+	got := BuildResolverPreview(resultMap, rs)
+	if got.SourceFileCount != 3 {
+		t.Fatalf("unexpected source file count: %d", got.SourceFileCount)
+	}
+	if got.RowCount != 2 {
+		t.Fatalf("unexpected row count: %d", got.RowCount)
+	}
+	if got.ObservedRoleCount != 3 {
+		t.Fatalf("unexpected observed role count: %d", got.ObservedRoleCount)
+	}
+	if got.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected unresolved role count: %d", got.UnresolvedRoleCount)
+	}
+	if len(got.Rows) != 2 {
+		t.Fatalf("expected 2 row previews, got %d", len(got.Rows))
+	}
+	if got.Rows[0].RowIndex != 0 || got.Rows[1].RowIndex != 2 {
+		t.Fatalf("unexpected row preview ordering: %#v", got.Rows)
+	}
+	if got.Rows[0].RoleNormalization[0].NormalizedRole != "BAM" {
+		t.Fatalf("unexpected first row normalization: %#v", got.Rows[0].RoleNormalization)
+	}
+	if got.Rows[1].RoleNormalization[0].ObservedKey != "bam" || got.Rows[1].RoleNormalization[0].NormalizedRole != "BAM" {
+		t.Fatalf("unexpected second row normalization: %#v", got.Rows[1].RoleNormalization)
+	}
+}
+
+func TestGenerateResolverPreview_BuildsPreviewFromCurrentGrouping(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+		"NA12878_chr21_1x.bam.bai",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	got, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	if got.RowCount != 1 || len(got.Rows) != 1 {
+		t.Fatalf("expected one preview row, got %#v", got)
+	}
+	if got.SourceFileCount != 2 {
+		t.Fatalf("unexpected source file count: %d", got.SourceFileCount)
+	}
+	if got.ObservedRoleCount != 2 {
+		t.Fatalf("unexpected observed role count: %d", got.ObservedRoleCount)
+	}
+	if got.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected unresolved role count: %d", got.UnresolvedRoleCount)
+	}
+	row := got.Rows[0]
+	if !reflect.DeepEqual(row.ObservedRoles, []string{"bam", "bam_bai"}) {
+		t.Fatalf("unexpected observed roles: %v", row.ObservedRoles)
+	}
+	if row.RoleNormalization[0].NormalizedRole != "BAM" || row.RoleNormalization[1].NormalizedRole != "BAI" {
+		t.Fatalf("unexpected normalization preview: %#v", row.RoleNormalization)
+	}
+}
+
+func TestGenerateResolverPreview_CountsUnresolvedRoles(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+		"NA12878_chr21_1x.bam.bai",
+		"NA12878_chr21_1x.debug",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	got, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	if got.SourceFileCount != 3 {
+		t.Fatalf("unexpected source file count: %d", got.SourceFileCount)
+	}
+	if got.RowCount != 1 {
+		t.Fatalf("unexpected row count: %d", got.RowCount)
+	}
+	if got.ObservedRoleCount != 3 {
+		t.Fatalf("unexpected observed role count: %d", got.ObservedRoleCount)
+	}
+	if got.UnresolvedRoleCount != 1 {
+		t.Fatalf("unexpected unresolved role count: %d", got.UnresolvedRoleCount)
+	}
+}
+
+func TestGenerateResolverPreview_PreservesDuplicateCollisionError(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	_, err := GenerateResolverPreview(files, rs)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error")
+	}
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+	if len(dupErr.Entries) != 1 || dupErr.Entries[0].RoleKey != "R1" {
+		t.Fatalf("unexpected duplicate error entries: %#v", dupErr.Entries)
+	}
+}
+
+func TestGenerateResolverPreviewFromDir_ReadOnlyPreviewPath(t *testing.T) {
+	dir := t.TempDir()
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+	b, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal rule set: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+	for _, name := range []string{
+		"NA12878_chr21_1x.bam",
+		"NA12878_chr21_1x.bam.bai",
+		"fileblock.csv",
+		"ignored.pb",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+
+	got, err := GenerateResolverPreviewFromDir(dir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir error: %v", err)
+	}
+	if got.SourceFileCount != 2 {
+		t.Fatalf("expected excluded generated outputs to be ignored, source count=%d", got.SourceFileCount)
+	}
+	if got.RowCount != 1 || got.ObservedRoleCount != 2 || got.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected preview summary: %#v", got)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(dir, "invalid_files_*.txt"))
+	if err != nil {
+		t.Fatalf("glob invalid reports: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected preview path not to write invalid reports, got %v", matches)
+	}
+}
+
+func TestGenerateResolverPreviewFromDir_PreservesDuplicateCollisionError(t *testing.T) {
+	dir := t.TempDir()
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+	b, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal rule set: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+	for _, name := range []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0644); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+
+	_, err = GenerateResolverPreviewFromDir(dir)
+	if err == nil {
+		t.Fatalf("expected duplicate collision error")
+	}
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("expected DuplicateCollisionError, got %T", err)
+	}
+	if len(dupErr.Entries) != 1 || dupErr.Entries[0].RoleKey != "R1" {
+		t.Fatalf("unexpected duplicate entries: %#v", dupErr.Entries)
+	}
+}
+
+func TestBuildSchemaValidationPreview_PairedEndValidHasNoMissingRequiredRole(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1_S1_L001_R2_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildSchemaValidationPreview(resolverPreview, rs)
+
+	if got.MissingRequiredRoleCount != 0 {
+		t.Fatalf("expected no missing required role candidates, got %#v", got)
+	}
+	if got.UnresolvedObservedRoleCount != 2 {
+		t.Fatalf("expected R1/R2 to remain unresolved observations, got %#v", got)
+	}
+	if got.EntryCount != 2 || got.Entries[0].ReasonCode != "unresolved_observed_role" || got.Entries[1].ReasonCode != "unresolved_observed_role" {
+		t.Fatalf("unexpected validation preview entries: %#v", got.Entries)
+	}
+}
+
+func TestBuildSchemaValidationPreview_PairedEndMissingRoleSeparatesUnresolvedFromMissing(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildSchemaValidationPreview(resolverPreview, rs)
+
+	if got.UnresolvedObservedRoleCount != 1 {
+		t.Fatalf("expected R1 to remain unresolved observation, got %#v", got)
+	}
+	if got.MissingRequiredRoleCount != 1 {
+		t.Fatalf("expected one missing required role candidate, got %#v", got)
+	}
+	if got.EntryCount != 2 {
+		t.Fatalf("expected two validation preview entries, got %#v", got)
+	}
+	if got.Entries[0].ReasonCode != "unresolved_observed_role" || got.Entries[0].ObservedKey != "R1" {
+		t.Fatalf("expected unresolved R1 entry first, got %#v", got.Entries)
+	}
+	if got.Entries[1].ReasonCode != "missing_required_role" || got.Entries[1].Role != "R2" {
+		t.Fatalf("expected missing R2 entry second, got %#v", got.Entries)
+	}
+}
+
+func TestBuildSchemaValidationPreview_ExtraObservedRoleIsSeparateObservation(t *testing.T) {
+	files := []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1_S1_L001_R2_001.fastq.gz",
+		"sample1_S1_L001_RX_001.fastq.gz",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: ColumnRules{MatchParts: []int{3}},
+		RoleNormalization: map[string]string{
+			"R1": "R1",
+			"R2": "R2",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildSchemaValidationPreview(resolverPreview, rs)
+
+	if got.MissingRequiredRoleCount != 0 {
+		t.Fatalf("expected no missing required role candidates, got %#v", got)
+	}
+	if got.UnresolvedObservedRoleCount != 1 {
+		t.Fatalf("expected RX to remain unresolved observation, got %#v", got)
+	}
+	if got.ExtraObservedRoleCount != 1 {
+		t.Fatalf("expected one extra observed role candidate, got %#v", got)
+	}
+	if got.EntryCount != 2 {
+		t.Fatalf("expected unresolved and extra entries, got %#v", got)
+	}
+	if got.Entries[1].ReasonCode != "extra_observed_role" || got.Entries[1].ObservedKey != "RX" {
+		t.Fatalf("expected extra RX entry, got %#v", got.Entries)
+	}
+}
+
+func TestBuildTypedRoleValidationPreview_BAMBAICompleteHasNoMissingRequiredRole(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+		"NA12878_chr21_1x.bam.bai",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleValidationPreview(resolverPreview, []string{"BAM", "BAI"})
+
+	if got.EntryCount != 0 {
+		t.Fatalf("expected complete BAM/BAI typed role preview to have no entries, got %#v", got)
+	}
+	if got.MissingRequiredRoleCount != 0 || got.UnresolvedObservedRoleCount != 0 || got.ExtraObservedRoleCount != 0 {
+		t.Fatalf("unexpected typed role validation summary: %#v", got)
+	}
+}
+
+func TestBuildTypedRoleValidationPreview_BAMOnlyReportsMissingBAI(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleValidationPreview(resolverPreview, []string{"BAM", "BAI"})
+
+	if got.MissingRequiredRoleCount != 1 {
+		t.Fatalf("expected one typed missing required role candidate, got %#v", got)
+	}
+	if got.EntryCount != 1 {
+		t.Fatalf("expected one typed role validation entry, got %#v", got)
+	}
+	entry := got.Entries[0]
+	if entry.ReasonCode != "missing_required_role" || entry.Role != "BAI" {
+		t.Fatalf("expected missing BAI typed role entry, got %#v", entry)
+	}
+}
+
+func TestBuildTypedRoleValidationPreview_BAIOnlyReportsMissingBAM(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam.bai",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleValidationPreview(resolverPreview, []string{"BAM", "BAI"})
+
+	if got.MissingRequiredRoleCount != 1 {
+		t.Fatalf("expected one typed missing required role candidate, got %#v", got)
+	}
+	if got.EntryCount != 1 {
+		t.Fatalf("expected one typed role validation entry, got %#v", got)
+	}
+	entry := got.Entries[0]
+	if entry.ReasonCode != "missing_required_role" || entry.Role != "BAM" {
+		t.Fatalf("expected missing BAM typed role entry, got %#v", entry)
+	}
+}
+
+func TestBuildTypedRoleValidationPreview_StaysSeparateFromObservedKeySchemaPreview(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	observedKeyPreview := BuildSchemaValidationPreview(resolverPreview, rs)
+	typedRolePreview := BuildTypedRoleValidationPreview(resolverPreview, []string{"BAM", "BAI"})
+
+	if observedKeyPreview.Entries[0].Role != "bam_bai" {
+		t.Fatalf("expected observed-key preview to report missing bam_bai, got %#v", observedKeyPreview.Entries)
+	}
+	if typedRolePreview.Entries[0].Role != "BAI" {
+		t.Fatalf("expected typed-role preview to report missing BAI, got %#v", typedRolePreview.Entries)
+	}
+}
+
+func TestBuildTypedRoleAssociationPreview_BAIOnlyReportsOrphanSidecar(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam.bai",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+
+	if got.EntryCount != 1 {
+		t.Fatalf("expected one association preview entry, got %#v", got)
+	}
+	entry := got.Entries[0]
+	if entry.ReasonCode != "orphan_sidecar_role" || entry.Role != "BAI" {
+		t.Fatalf("expected orphan BAI sidecar entry, got %#v", entry)
+	}
+	if entry.ObservedKey != "bam_bai" || entry.NormalizedRole != "BAI" || entry.FileName == "" {
+		t.Fatalf("expected sidecar source context to be preserved, got %#v", entry)
+	}
+}
+
+func TestBuildTypedRoleAssociationPreview_BAMOnlyHasNoAssociationEntry(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+
+	if got.EntryCount != 0 {
+		t.Fatalf("expected no association preview entries for BAM-only row, got %#v", got)
+	}
+}
+
+func TestBuildTypedRoleAssociationPreview_BAMBAICompleteHasNoAssociationEntry(t *testing.T) {
+	files := []string{
+		"NA12878_chr21_1x.bam",
+		"NA12878_chr21_1x.bam.bai",
+	}
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+
+	resolverPreview, err := GenerateResolverPreview(files, rs)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreview error: %v", err)
+	}
+	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+
+	if got.EntryCount != 0 {
+		t.Fatalf("expected no association preview entries for complete BAM/BAI row, got %#v", got)
+	}
+}
+
 func TestIsValidRuleSet(t *testing.T) {
 	rs := RuleSet{
 		RowRules:    RowRules{MatchParts: []int{0, 1}},
@@ -596,5 +1247,39 @@ func TestLoadRuleSetFromFile(t *testing.T) {
 	}
 	if loaded.Delimiter[0] != "_" || loaded.Header[0] != "A" {
 		t.Errorf("loaded data mismatch: %+v", loaded)
+	}
+}
+
+func TestLoadRuleSetFromFile_LoadsOptionalRoleNormalization(t *testing.T) {
+	dir := t.TempDir()
+	rs := RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bam", "bam_bai"},
+		RowRules:    RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: ColumnRules{MatchParts: []int{3, 4}},
+		RoleNormalization: map[string]string{
+			"bam":     "BAM",
+			"bam_bai": "BAI",
+		},
+	}
+	b, err := json.Marshal(rs)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+		t.Fatalf("write rule.json error: %v", err)
+	}
+
+	loaded, err := LoadRuleSetFromFile(dir)
+	if err != nil {
+		t.Fatalf("LoadRuleSetFromFile error: %v", err)
+	}
+
+	if !reflect.DeepEqual(loaded.RoleNormalization, rs.RoleNormalization) {
+		t.Fatalf("unexpected role normalization map: got=%v want=%v", loaded.RoleNormalization, rs.RoleNormalization)
+	}
+	normalized, found := NormalizeRoleKey("bam_bai", loaded)
+	if !found || normalized != "BAI" {
+		t.Fatalf("expected loaded bam_bai normalization to BAI, got=%q found=%v", normalized, found)
 	}
 }

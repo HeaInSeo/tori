@@ -8,25 +8,33 @@ SHELL := /bin/bash
 
 LOCALBIN := $(CURDIR)/bin
 REPORT_DIR := $(CURDIR)/reports
+TORI_NAS_FIXTURE_ROOT ?= /mnt/genomics-test/tori-public-fixtures
+TORI_SHARED_FIXTURE_ROOT ?= $(TORI_NAS_FIXTURE_ROOT)
 
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 GOLANGCI_LINT_VERSION := v2.11.3
 
 GOVULNCHECK := $(LOCALBIN)/govulncheck
 GOVULNCHECK_VERSION := v1.1.4
+BUF := $(LOCALBIN)/buf
 
 # Track A focused lint scope (service/transport/runtime is intentionally excluded in Phase 0).
 PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: test test-core test-guardrail fmt vet lint lint-depguard lint-security vuln vuln-all golangci-lint govulncheck
+.PHONY: test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security proto-lint vuln vuln-all golangci-lint govulncheck
 
 test:
 	go test -race ./...
 
 test-core: test-guardrail
 	go test -race $(PKGS_TEST_CORE)
+
+test-shared-fs-fixtures:
+	TORI_SHARED_FIXTURE_ROOT="$(TORI_SHARED_FIXTURE_ROOT)" go test -race ./block -run TestSharedFSFixtureSmoke
+
+test-nas-fixtures: test-shared-fs-fixtures
 
 test-guardrail:
 	go test . -run TestExternalAPIProtosImportGuardrail
@@ -80,6 +88,10 @@ lint: golangci-lint lint-depguard
 lint-depguard: golangci-lint
 	@mkdir -p "$(REPORT_DIR)"
 	@$(GOLANGCI_LINT) run --enable-only depguard $(PKGS_LINT) | tee "$(REPORT_DIR)/lint-depguard.txt"
+
+proto-lint:
+	@test -x "$(BUF)" || { echo "$(BUF) is required for proto-lint"; exit 1; }
+	@BUF_CACHE_DIR="$${BUF_CACHE_DIR:-/tmp/buf-cache}" "$(BUF)" lint
 
 lint-security: golangci-lint
 	@mkdir -p "$(REPORT_DIR)"

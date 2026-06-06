@@ -24,6 +24,8 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 
 ## Commands
 - `make test-core` runs the core baseline tests and the external `api-protos` removal guardrail.
+- `make test-shared-fs-fixtures` runs the opt-in shared filesystem fixture smoke test using `TORI_SHARED_FIXTURE_ROOT` (default: `/mnt/genomics-test/tori-public-fixtures`; NAS today, applicable to Lustre).
+- `make test-nas-fixtures` is a compatibility alias for the shared filesystem fixture smoke test.
 - `make lint`: fail gate for core + cmd scope
 - `make lint-security`: report-only security observation (`sqlclosecheck`, `gosec`) for core scope
 - `make vuln`: report-only vuln scan for core scope
@@ -37,6 +39,12 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/tori_phase0_environment_setup_checklist_v0.1.md`](docs/tori_phase0_environment_setup_checklist_v0.1.md)
 - [`docs/duplicate_policy_design_note_v0.1.md`](docs/duplicate_policy_design_note_v0.1.md)
 - [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
+- [`docs/track_a_pair_end_regression_contract_v0.1.md`](docs/track_a_pair_end_regression_contract_v0.1.md)
+- [`docs/track_a_alignment_index_typed_view_candidate_v0.1.md`](docs/track_a_alignment_index_typed_view_candidate_v0.1.md)
+- [`docs/track_a_alignment_index_probe_result_v0.1.md`](docs/track_a_alignment_index_probe_result_v0.1.md)
+- [`docs/track_a_role_normalization_seam_v0.1.md`](docs/track_a_role_normalization_seam_v0.1.md)
+- [`docs/track_a_role_normalization_decision_v0.1.md`](docs/track_a_role_normalization_decision_v0.1.md)
+- [`docs/track_a_fixture_probe_vs_typed_view_rule_v0.1.md`](docs/track_a_fixture_probe_vs_typed_view_rule_v0.1.md)
 - [`docs/architecture/transport_boundary.md`](docs/architecture/transport_boundary.md)
 - [`docs/architecture/proto_contract_ownership.md`](docs/architecture/proto_contract_ownership.md)
 - [`docs/architecture/proto_ownership_sprint_plan.md`](docs/architecture/proto_ownership_sprint_plan.md)
@@ -44,6 +52,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/architecture/proto_canonicalization_phase1_note.md`](docs/architecture/proto_canonicalization_phase1_note.md)
 - [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
+- [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
 
 ## Deferred Area (Explicit)
 - Final proto contract ownership is narrowed but not fully closed for all services yet.

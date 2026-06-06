@@ -19,12 +19,13 @@ var logger = globallog.Log
 // --- RuleSet 및 관련 타입 정의 -----------------------------------------
 
 type RuleSet struct {
-	Version     string      `json:"version"`
-	Delimiter   []string    `json:"delimiter"`
-	Header      []string    `json:"header"`
-	RowRules    RowRules    `json:"rowRules"`
-	ColumnRules ColumnRules `json:"columnRules"`
-	SizeRules   SizeRules   `json:"sizeRules"`
+	Version           string            `json:"version"`
+	Delimiter         []string          `json:"delimiter"`
+	Header            []string          `json:"header"`
+	RowRules          RowRules          `json:"rowRules"`
+	ColumnRules       ColumnRules       `json:"columnRules"`
+	SizeRules         SizeRules         `json:"sizeRules"`
+	RoleNormalization map[string]string `json:"roleNormalization,omitempty"`
 }
 
 type RowRules struct {
@@ -61,6 +62,314 @@ type DuplicateCollisionError struct {
 
 func (e *DuplicateCollisionError) Error() string {
 	return fmt.Sprintf("duplicate collision detected: %d entries", len(e.Entries))
+}
+
+type RoleNormalizationPreviewEntry struct {
+	ObservedKey    string
+	NormalizedRole string
+	Resolved       bool
+	FileName       string
+}
+
+type RowPreview struct {
+	RowIndex          int
+	ObservedRoles     []string
+	RoleNormalization []RoleNormalizationPreviewEntry
+}
+
+type ResolverPreview struct {
+	SourceFileCount     int
+	RowCount            int
+	ObservedRoleCount   int
+	UnresolvedRoleCount int
+	Rows                []RowPreview
+}
+
+type SchemaValidationPreviewEntry struct {
+	ReasonCode     string
+	RowIndex       int
+	Role           string
+	ObservedKey    string
+	NormalizedRole string
+	FileName       string
+}
+
+type SchemaValidationPreview struct {
+	EntryCount                  int
+	MissingRequiredRoleCount    int
+	UnresolvedObservedRoleCount int
+	ExtraObservedRoleCount      int
+	Entries                     []SchemaValidationPreviewEntry
+}
+
+func NormalizeRoleKey(observedKey string, ruleSet RuleSet) (normalizedRole string, found bool) {
+	if ruleSet.RoleNormalization == nil {
+		return "", false
+	}
+	normalizedRole, found = ruleSet.RoleNormalization[observedKey]
+	return normalizedRole, found
+}
+
+func BuildRoleNormalizationPreview(rowMap map[string]string, ruleSet RuleSet) []RoleNormalizationPreviewEntry {
+	keys := make([]string, 0, len(rowMap))
+	for key := range rowMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	preview := make([]RoleNormalizationPreviewEntry, 0, len(keys))
+	for _, key := range keys {
+		normalized, found := NormalizeRoleKey(key, ruleSet)
+		preview = append(preview, RoleNormalizationPreviewEntry{
+			ObservedKey:    key,
+			NormalizedRole: normalized,
+			Resolved:       found,
+			FileName:       rowMap[key],
+		})
+	}
+	return preview
+}
+
+func BuildRowPreview(rowIndex int, rowMap map[string]string, ruleSet RuleSet) RowPreview {
+	observedRoles := make([]string, 0, len(rowMap))
+	for key := range rowMap {
+		observedRoles = append(observedRoles, key)
+	}
+	sort.Strings(observedRoles)
+
+	return RowPreview{
+		RowIndex:          rowIndex,
+		ObservedRoles:     observedRoles,
+		RoleNormalization: BuildRoleNormalizationPreview(rowMap, ruleSet),
+	}
+}
+
+func BuildResolverPreview(resultMap map[int]map[string]string, ruleSet RuleSet) ResolverPreview {
+	return buildResolverPreview(resultMap, ruleSet, countGroupedSourceFiles(resultMap))
+}
+
+func buildResolverPreview(resultMap map[int]map[string]string, ruleSet RuleSet, sourceFileCount int) ResolverPreview {
+	rowIndexes := make([]int, 0, len(resultMap))
+	for rowIndex := range resultMap {
+		rowIndexes = append(rowIndexes, rowIndex)
+	}
+	sort.Ints(rowIndexes)
+
+	rows := make([]RowPreview, 0, len(rowIndexes))
+	observedRoleCount := 0
+	unresolvedRoleCount := 0
+	for _, rowIndex := range rowIndexes {
+		rowPreview := BuildRowPreview(rowIndex, resultMap[rowIndex], ruleSet)
+		rows = append(rows, rowPreview)
+		observedRoleCount += len(rowPreview.ObservedRoles)
+		for _, entry := range rowPreview.RoleNormalization {
+			if !entry.Resolved {
+				unresolvedRoleCount++
+			}
+		}
+	}
+	return ResolverPreview{
+		SourceFileCount:     sourceFileCount,
+		RowCount:            len(rows),
+		ObservedRoleCount:   observedRoleCount,
+		UnresolvedRoleCount: unresolvedRoleCount,
+		Rows:                rows,
+	}
+}
+
+func countGroupedSourceFiles(resultMap map[int]map[string]string) int {
+	count := 0
+	for _, row := range resultMap {
+		count += len(row)
+	}
+	return count
+}
+
+func GenerateResolverPreview(fileNames []string, ruleSet RuleSet) (ResolverPreview, error) {
+	resultMap, err := GroupFiles(fileNames, ruleSet)
+	if err != nil {
+		return ResolverPreview{}, err
+	}
+	return buildResolverPreview(resultMap, ruleSet, len(fileNames)), nil
+}
+
+func GenerateResolverPreviewFromDir(dirPath string) (ResolverPreview, error) {
+	ruleSet, err := LoadRuleSetFromFile(dirPath)
+	if err != nil {
+		return ResolverPreview{}, fmt.Errorf("failed to load rule set: %w", err)
+	}
+	if !IsValidRuleSet(ruleSet) {
+		return ResolverPreview{}, fmt.Errorf("rule set has conflicts or unused parts")
+	}
+
+	exclusions := []string{"rule.json", "invalid_files", "fileblock.csv", "*.pb"}
+	fileNames, err := ListFilesExclude(dirPath, exclusions)
+	if err != nil {
+		return ResolverPreview{}, fmt.Errorf("failed to list preview files: %w", err)
+	}
+	return GenerateResolverPreview(fileNames, ruleSet)
+}
+
+func BuildSchemaValidationPreview(resolverPreview ResolverPreview, ruleSet RuleSet) SchemaValidationPreview {
+	entries := make([]SchemaValidationPreviewEntry, 0)
+	missingRequiredRoleCount := 0
+	unresolvedObservedRoleCount := 0
+	extraObservedRoleCount := 0
+	headerSet := make(map[string]struct{}, len(ruleSet.Header))
+	for _, header := range ruleSet.Header {
+		headerSet[header] = struct{}{}
+	}
+
+	for _, row := range resolverPreview.Rows {
+		observedSet := make(map[string]RoleNormalizationPreviewEntry, len(row.RoleNormalization))
+		for _, entry := range row.RoleNormalization {
+			observedSet[entry.ObservedKey] = entry
+			if !entry.Resolved {
+				unresolvedObservedRoleCount++
+				entries = append(entries, SchemaValidationPreviewEntry{
+					ReasonCode:  "unresolved_observed_role",
+					RowIndex:    row.RowIndex,
+					ObservedKey: entry.ObservedKey,
+					FileName:    entry.FileName,
+				})
+			}
+		}
+
+		for _, header := range ruleSet.Header {
+			entry, ok := observedSet[header]
+			if !ok || entry.FileName == "" {
+				missingRequiredRoleCount++
+				entries = append(entries, SchemaValidationPreviewEntry{
+					ReasonCode: "missing_required_role",
+					RowIndex:   row.RowIndex,
+					Role:       header,
+				})
+			}
+		}
+
+		for _, observedRole := range row.ObservedRoles {
+			if _, ok := headerSet[observedRole]; ok {
+				continue
+			}
+			entry := observedSet[observedRole]
+			extraObservedRoleCount++
+			entries = append(entries, SchemaValidationPreviewEntry{
+				ReasonCode:     "extra_observed_role",
+				RowIndex:       row.RowIndex,
+				ObservedKey:    observedRole,
+				NormalizedRole: entry.NormalizedRole,
+				FileName:       entry.FileName,
+			})
+		}
+	}
+
+	return SchemaValidationPreview{
+		EntryCount:                  len(entries),
+		MissingRequiredRoleCount:    missingRequiredRoleCount,
+		UnresolvedObservedRoleCount: unresolvedObservedRoleCount,
+		ExtraObservedRoleCount:      extraObservedRoleCount,
+		Entries:                     entries,
+	}
+}
+
+func BuildTypedRoleValidationPreview(resolverPreview ResolverPreview, requiredRoles []string) SchemaValidationPreview {
+	entries := make([]SchemaValidationPreviewEntry, 0)
+	missingRequiredRoleCount := 0
+	unresolvedObservedRoleCount := 0
+	extraObservedRoleCount := 0
+	requiredRoleSet := make(map[string]struct{}, len(requiredRoles))
+	for _, role := range requiredRoles {
+		requiredRoleSet[role] = struct{}{}
+	}
+
+	for _, row := range resolverPreview.Rows {
+		typedRoleSet := make(map[string]RoleNormalizationPreviewEntry, len(row.RoleNormalization))
+		for _, entry := range row.RoleNormalization {
+			if !entry.Resolved {
+				unresolvedObservedRoleCount++
+				entries = append(entries, SchemaValidationPreviewEntry{
+					ReasonCode:  "unresolved_observed_role",
+					RowIndex:    row.RowIndex,
+					ObservedKey: entry.ObservedKey,
+					FileName:    entry.FileName,
+				})
+				continue
+			}
+
+			typedRoleSet[entry.NormalizedRole] = entry
+			if _, ok := requiredRoleSet[entry.NormalizedRole]; ok {
+				continue
+			}
+			extraObservedRoleCount++
+			entries = append(entries, SchemaValidationPreviewEntry{
+				ReasonCode:     "extra_observed_role",
+				RowIndex:       row.RowIndex,
+				Role:           entry.NormalizedRole,
+				ObservedKey:    entry.ObservedKey,
+				NormalizedRole: entry.NormalizedRole,
+				FileName:       entry.FileName,
+			})
+		}
+
+		for _, role := range requiredRoles {
+			entry, ok := typedRoleSet[role]
+			if !ok || entry.FileName == "" {
+				missingRequiredRoleCount++
+				entries = append(entries, SchemaValidationPreviewEntry{
+					ReasonCode: "missing_required_role",
+					RowIndex:   row.RowIndex,
+					Role:       role,
+				})
+			}
+		}
+	}
+
+	return SchemaValidationPreview{
+		EntryCount:                  len(entries),
+		MissingRequiredRoleCount:    missingRequiredRoleCount,
+		UnresolvedObservedRoleCount: unresolvedObservedRoleCount,
+		ExtraObservedRoleCount:      extraObservedRoleCount,
+		Entries:                     entries,
+	}
+}
+
+func BuildTypedRoleAssociationPreview(resolverPreview ResolverPreview, primaryRole string, sidecarRole string) SchemaValidationPreview {
+	entries := make([]SchemaValidationPreviewEntry, 0)
+
+	for _, row := range resolverPreview.Rows {
+		hasPrimary := false
+		var sidecarEntry RoleNormalizationPreviewEntry
+		hasSidecar := false
+
+		for _, entry := range row.RoleNormalization {
+			if !entry.Resolved {
+				continue
+			}
+			if entry.NormalizedRole == primaryRole {
+				hasPrimary = true
+			}
+			if entry.NormalizedRole == sidecarRole {
+				hasSidecar = true
+				sidecarEntry = entry
+			}
+		}
+
+		if hasSidecar && !hasPrimary {
+			entries = append(entries, SchemaValidationPreviewEntry{
+				ReasonCode:     "orphan_sidecar_role",
+				RowIndex:       row.RowIndex,
+				Role:           sidecarRole,
+				ObservedKey:    sidecarEntry.ObservedKey,
+				NormalizedRole: sidecarEntry.NormalizedRole,
+				FileName:       sidecarEntry.FileName,
+			})
+		}
+	}
+
+	return SchemaValidationPreview{
+		EntryCount: len(entries),
+		Entries:    entries,
+	}
 }
 
 // ----------------------------------------------------------------------

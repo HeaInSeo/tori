@@ -24,6 +24,8 @@
 
 ## 명령
 - `make test-core`: 코어 baseline 테스트와 external `api-protos` 제거 guardrail 실행
+- `make test-shared-fs-fixtures`: `TORI_SHARED_FIXTURE_ROOT` 기준 shared filesystem fixture smoke 테스트 실행(기본값: `/mnt/genomics-test/tori-public-fixtures`; 현재는 NAS, Lustre에도 적용)
+- `make test-nas-fixtures`: shared filesystem fixture smoke 테스트의 호환 alias
 - `make lint`: 코어+cmd 범위 fail gate
 - `make lint-security`: 코어 범위 보안 관찰(report-only, `sqlclosecheck`/`gosec`)
 - `make vuln`: 코어 범위 취약점 관찰(report-only)
@@ -37,12 +39,19 @@
 - [`docs/tori_phase0_environment_setup_checklist_v0.1.md`](docs/tori_phase0_environment_setup_checklist_v0.1.md)
 - [`docs/duplicate_policy_design_note_v0.1.md`](docs/duplicate_policy_design_note_v0.1.md)
 - [`docs/duplicate_policy_contract_v0.1.md`](docs/duplicate_policy_contract_v0.1.md)
+- [`docs/track_a_pair_end_regression_contract_v0.1.md`](docs/track_a_pair_end_regression_contract_v0.1.md)
+- [`docs/track_a_alignment_index_typed_view_candidate_v0.1.md`](docs/track_a_alignment_index_typed_view_candidate_v0.1.md)
+- [`docs/track_a_alignment_index_probe_result_v0.1.md`](docs/track_a_alignment_index_probe_result_v0.1.md)
+- [`docs/track_a_role_normalization_seam_v0.1.md`](docs/track_a_role_normalization_seam_v0.1.md)
+- [`docs/track_a_role_normalization_decision_v0.1.md`](docs/track_a_role_normalization_decision_v0.1.md)
+- [`docs/track_a_fixture_probe_vs_typed_view_rule_v0.1.md`](docs/track_a_fixture_probe_vs_typed_view_rule_v0.1.md)
 - [`docs/architecture/transport_boundary.md`](docs/architecture/transport_boundary.md)
 - [`docs/architecture/proto_contract_ownership.md`](docs/architecture/proto_contract_ownership.md)
 - [`docs/architecture/remote_rpc_surface_decision_note.md`](docs/architecture/remote_rpc_surface_decision_note.md)
 - [`docs/architecture/proto_canonicalization_phase1_note.md`](docs/architecture/proto_canonicalization_phase1_note.md)
 - [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
+- [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
 
 ## 보류 영역(명시)
 - 최종 proto contract ownership은 서비스 전체 기준으로는 아직 완전히 닫히지 않았다.
