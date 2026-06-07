@@ -25,3 +25,7 @@ qodana.yaml
 
 # lint
 lint_results.json
+
+# Local tool binaries
+bin/buf
+bin/govulncheck

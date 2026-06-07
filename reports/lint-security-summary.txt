@@ -1,3 +1,3 @@
 [phase0] security scan scope: ./db ./rules ./block
-sqlclosecheck_exit=0
-gosec_exit=0
+sqlclosecheck_exit=1
+gosec_exit=1
