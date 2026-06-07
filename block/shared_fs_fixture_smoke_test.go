@@ -190,6 +190,35 @@ func TestSharedFSFixtureSmoke_AlignmentBAMIndexFixtureSpecificCurrentRuleProbe(t
 	}
 	assertNoGeneratedPreviewOutputs(t, workDir)
 
+	orphanBAIFileName := "NA12878_chr21_1x.bam.bai"
+	if _, err := os.Stat(filepath.Join(alignmentDir, orphanBAIFileName)); err != nil {
+		t.Fatalf("expected shared fixture orphan BAI source candidate at %s: %v", filepath.Join(alignmentDir, orphanBAIFileName), err)
+	}
+	orphanWorkDir := prepareSharedFSFixtureWorkDirWithRuleAndFiles(t, ruleSet, []string{orphanBAIFileName})
+	orphanPreview, err := rules.GenerateResolverPreviewFromDir(orphanWorkDir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir orphan BAI probe error: %v", err)
+	}
+	if orphanPreview.SourceFileCount != 1 || orphanPreview.RowCount != 1 || orphanPreview.ObservedRoleCount != 1 || orphanPreview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected orphan BAI preview summary: %#v", orphanPreview)
+	}
+	if orphanPreview.Rows[0].RoleNormalization[0].ObservedKey != "bam_bai" || orphanPreview.Rows[0].RoleNormalization[0].NormalizedRole != "BAI" {
+		t.Fatalf("unexpected orphan BAI normalization preview: %#v", orphanPreview.Rows[0].RoleNormalization)
+	}
+	orphanSchemaPreview := rules.BuildSchemaValidationPreview(orphanPreview, ruleSet)
+	if orphanSchemaPreview.MissingRequiredRoleCount != 1 || orphanSchemaPreview.Entries[0].Role != "bam" {
+		t.Fatalf("expected orphan BAI observed-key schema preview to report missing bam, got %#v", orphanSchemaPreview)
+	}
+	orphanTypedPreview := rules.BuildTypedRoleValidationPreview(orphanPreview, []string{"BAM", "BAI"})
+	if orphanTypedPreview.MissingRequiredRoleCount != 1 || orphanTypedPreview.Entries[0].Role != "BAM" {
+		t.Fatalf("expected orphan BAI typed-role preview to report missing BAM, got %#v", orphanTypedPreview)
+	}
+	orphanAssociationPreview := rules.BuildTypedRoleAssociationPreview(orphanPreview, "BAM", "BAI")
+	if orphanAssociationPreview.EntryCount != 1 || orphanAssociationPreview.Entries[0].ReasonCode != "orphan_sidecar_role" {
+		t.Fatalf("expected orphan BAI association preview candidate, got %#v", orphanAssociationPreview)
+	}
+	assertNoGeneratedPreviewOutputs(t, orphanWorkDir)
+
 	fb, err := GenerateFileBlock(workDir, fileNames)
 	if err != nil {
 		t.Fatalf("GenerateFileBlock alignment BAM/BAI probe error: %v", err)
@@ -260,6 +289,23 @@ func prepareSharedFSFixtureWorkDirWithRule(t *testing.T, sourceDir string, ruleS
 	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
 
 	return workDir, fileNames
+}
+
+func prepareSharedFSFixtureWorkDirWithRuleAndFiles(t *testing.T, ruleSet rules.RuleSet, fileNames []string) string {
+	t.Helper()
+
+	ruleData, err := json.MarshalIndent(ruleSet, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal probe rule.json: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
+		t.Fatalf("write temp probe rule.json: %v", err)
+	}
+	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
+
+	return workDir
 }
 
 func writeFixtureFileNamePlaceholders(t *testing.T, workDir string, fileNames []string) {

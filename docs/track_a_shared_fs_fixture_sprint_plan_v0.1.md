@@ -724,11 +724,13 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 - BAM/BAI alignment index validation preview 후보 결정은 `docs/track_a_alignment_index_validation_preview_candidate_v0.1.md`에 문서화했다.
 - 내일 마감 기준 다음 구현은 하지 않고 최종 검증과 보고를 우선한다.
 - CRAM/CRAI probe와 validator 구현은 마감 이후로 미룬다.
+- 마감 후 첫 follow-up으로 existing BAI filename을 이용한 temp workdir orphan smoke를 추가했다.
+- 이 follow-up은 shared fixture pack manifest/checksum을 변경하지 않는다.
 
 다음 작은 결정:
 
 - 2026-06-06 마감 후 `alignment_bam_orphan_index` fixture 추가 여부를 재검토한다.
-- fixture를 추가한다면 manifest/checksum 갱신과 orphan shared smoke 연결을 같은 작은 sprint로 묶는다.
+- fixture를 추가한다면 manifest/checksum 갱신과 real orphan fixture smoke 연결을 같은 작은 sprint로 묶는다.
 - normalization map은 v0.1에서 rule spec 쪽에 둔다는 기존 결정은 유지한다.
 - current `RoleKey`는 observed key 의미를 유지한다는 기존 결정은 유지한다.
 

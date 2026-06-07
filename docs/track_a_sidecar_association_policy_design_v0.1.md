@@ -152,6 +152,15 @@ Sprint 15 결정:
 - shared filesystem fixture pack은 complete BAM/BAI positive smoke까지만 유지한다.
 - manifest/checksum 갱신은 마감 후 별도 fixture expansion sprint에서 다룬다.
 
+Sprint 16 follow-up:
+
+- shared fixture pack을 수정하지 않고 existing `alignment_bam/NA12878_chr21_1x.bam.bai` filename을 사용해 BAI-only temp workdir smoke를 추가했다.
+- 이 smoke는 shared fixture root에 파일을 쓰지 않는다.
+- observed-key schema preview는 missing `bam`을 보고한다.
+- typed-role validation preview는 missing `BAM`을 보고한다.
+- typed-role association preview는 `orphan_sidecar_role`을 보고한다.
+- 따라서 orphan sidecar negative anchor는 synthetic-only에서 shared filename anchored temp smoke로 올라갔다.
+
 ## 10. 비범위
 
 - public diagnostics/report surface
