@@ -115,13 +115,14 @@ var File_ichthys_v1_syncfolders_service_proto protoreflect.FileDescriptor
 
 const file_ichthys_v1_syncfolders_service_proto_rawDesc = "" +
 	"\n" +
-	"$ichthys/v1/syncfolders_service.proto\x12\aichthys\"*\n" +
+	"$ichthys/v1/syncfolders_service.proto\x12\n" +
+	"ichthys.v1\"*\n" +
 	"\x12SyncFoldersRequest\x12\x14\n" +
 	"\x05force\x18\x01 \x01(\bR\x05force\"/\n" +
 	"\x13SyncFoldersResponse\x12\x18\n" +
-	"\aupdated\x18\x01 \x01(\bR\aupdated2^\n" +
-	"\x12SyncFoldersService\x12H\n" +
-	"\vSyncFolders\x12\x1b.ichthys.SyncFoldersRequest\x1a\x1c.ichthys.SyncFoldersResponseB7Z5github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
+	"\aupdated\x18\x01 \x01(\bR\aupdated2d\n" +
+	"\x12SyncFoldersService\x12N\n" +
+	"\vSyncFolders\x12\x1e.ichthys.v1.SyncFoldersRequest\x1a\x1f.ichthys.v1.SyncFoldersResponseB7Z5github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
 
 var (
 	file_ichthys_v1_syncfolders_service_proto_rawDescOnce sync.Once
@@ -137,12 +138,12 @@ func file_ichthys_v1_syncfolders_service_proto_rawDescGZIP() []byte {
 
 var file_ichthys_v1_syncfolders_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_ichthys_v1_syncfolders_service_proto_goTypes = []any{
-	(*SyncFoldersRequest)(nil),  // 0: ichthys.SyncFoldersRequest
-	(*SyncFoldersResponse)(nil), // 1: ichthys.SyncFoldersResponse
+	(*SyncFoldersRequest)(nil),  // 0: ichthys.v1.SyncFoldersRequest
+	(*SyncFoldersResponse)(nil), // 1: ichthys.v1.SyncFoldersResponse
 }
 var file_ichthys_v1_syncfolders_service_proto_depIdxs = []int32{
-	0, // 0: ichthys.SyncFoldersService.SyncFolders:input_type -> ichthys.SyncFoldersRequest
-	1, // 1: ichthys.SyncFoldersService.SyncFolders:output_type -> ichthys.SyncFoldersResponse
+	0, // 0: ichthys.v1.SyncFoldersService.SyncFolders:input_type -> ichthys.v1.SyncFoldersRequest
+	1, // 1: ichthys.v1.SyncFoldersService.SyncFolders:output_type -> ichthys.v1.SyncFoldersResponse
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

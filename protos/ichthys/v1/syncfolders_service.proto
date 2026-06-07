@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package ichthys;
+package ichthys.v1;
 
 option go_package = "github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1";
 

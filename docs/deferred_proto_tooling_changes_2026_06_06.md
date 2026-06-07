@@ -1,6 +1,6 @@
 # Deferred Proto Tooling Changes
 ### 기준일: 2026-06-06
-### 상태: deferred, verified locally
+### 상태: proto tooling commit candidate verified; binary/report artifacts deferred
 
 ## 1. 목적
 
@@ -59,7 +59,22 @@ go test . -run TestExternalAPIProtosImportGuardrail
 첫 `./bin/buf lint` 시도는 기본 cache 경로 `/home/heain/.cache/buf`가 read-only라 실패했다.
 `BUF_CACHE_DIR=/tmp/buf-cache`로 지정하면 통과한다.
 
-## 5. 다음 처리 제안
+## 5. 2026-06-07 처리 결정
+
+별도 proto/tooling 커밋으로 처리할 범위:
+
+- `buf.yaml`
+- proto source/generated 파일
+
+계속 보류할 범위:
+
+- `bin/buf`
+- `bin/govulncheck`
+- report output files
+
+이 결정은 Track A regression baseline 커밋과 proto/transport contract 성격 변경을 분리하기 위한 것이다.
+
+## 6. 다음 처리 제안
 
 별도 proto/tooling 커밋으로 처리할 후보:
 

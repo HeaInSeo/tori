@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DataBlockService_FetchDataBlock_FullMethodName = "/ichthys.DataBlockService/FetchDataBlock"
+	DataBlockService_FetchDataBlock_FullMethodName = "/ichthys.v1.DataBlockService/FetchDataBlock"
 )
 
 // DataBlockServiceClient is the client API for DataBlockService service.
@@ -108,7 +108,7 @@ func _DataBlockService_FetchDataBlock_Handler(srv interface{}, ctx context.Conte
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var DataBlockService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ichthys.DataBlockService",
+	ServiceName: "ichthys.v1.DataBlockService",
 	HandlerType: (*DataBlockServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
