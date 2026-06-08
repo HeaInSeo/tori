@@ -24,13 +24,13 @@
   - resolver preview
   - observed-key schema validation preview
   - typed-role validation preview
-  - typed-role association preview
+  - typed-role pairing preview
 - `rules/rules_test.go`
   - duplicate/current semantics anchors
-  - schema/typed-role/association synthetic anchors
+  - schema/typed-role/pairing synthetic anchors
 - `block/shared_fs_fixture_smoke_test.go`
   - shared filesystem pair-end smoke
-  - BAM/BAI positive association smoke
+  - BAM/BAI positive pairing smoke
 - `block/fileblock.go`
   - FileBlock generation layer에서 header exact validation을 적용한다.
 - `block/fileblock_test.go`
@@ -49,7 +49,7 @@
   - `docs/track_a_role_normalization_decision_v0.1.md`
   - `docs/track_a_schema_validation_boundary_design_v0.1.md`
   - `docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`
-  - `docs/track_a_sidecar_association_policy_design_v0.1.md`
+  - `docs/track_a_primary_index_pairing_policy_design_v0.1.md`
   - `docs/track_a_tomorrow_scope_freeze_v0.1.md`
   - `docs/track_a_final_readiness_report_2026_06_06.md`
 

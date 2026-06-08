@@ -333,13 +333,13 @@ func BuildTypedRoleValidationPreview(resolverPreview ResolverPreview, requiredRo
 	}
 }
 
-func BuildTypedRoleAssociationPreview(resolverPreview ResolverPreview, primaryRole string, sidecarRole string) SchemaValidationPreview {
+func BuildPrimaryIndexPairingPreview(resolverPreview ResolverPreview, primaryRole string, indexRole string) SchemaValidationPreview {
 	entries := make([]SchemaValidationPreviewEntry, 0)
 
 	for _, row := range resolverPreview.Rows {
 		hasPrimary := false
-		var sidecarEntry RoleNormalizationPreviewEntry
-		hasSidecar := false
+		var indexEntry RoleNormalizationPreviewEntry
+		hasIndex := false
 
 		for _, entry := range row.RoleNormalization {
 			if !entry.Resolved {
@@ -348,20 +348,20 @@ func BuildTypedRoleAssociationPreview(resolverPreview ResolverPreview, primaryRo
 			if entry.NormalizedRole == primaryRole {
 				hasPrimary = true
 			}
-			if entry.NormalizedRole == sidecarRole {
-				hasSidecar = true
-				sidecarEntry = entry
+			if entry.NormalizedRole == indexRole {
+				hasIndex = true
+				indexEntry = entry
 			}
 		}
 
-		if hasSidecar && !hasPrimary {
+		if hasIndex && !hasPrimary {
 			entries = append(entries, SchemaValidationPreviewEntry{
-				ReasonCode:     "orphan_sidecar_role",
+				ReasonCode:     "unpaired_index_role",
 				RowIndex:       row.RowIndex,
-				Role:           sidecarRole,
-				ObservedKey:    sidecarEntry.ObservedKey,
-				NormalizedRole: sidecarEntry.NormalizedRole,
-				FileName:       sidecarEntry.FileName,
+				Role:           indexRole,
+				ObservedKey:    indexEntry.ObservedKey,
+				NormalizedRole: indexEntry.NormalizedRole,
+				FileName:       indexEntry.FileName,
 			})
 		}
 	}

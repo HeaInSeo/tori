@@ -75,7 +75,7 @@ extra role은 향후 report 후보지만, 현재 strict error로 승격하지 �
 | `unresolved_observed_role` | normalization | observed key가 typed role로 해석되지 않음 | 미구현 |
 | `missing_required_role` | schema completeness | required role이 row에 없음 | preview helper 구현 |
 | `extra_observed_role` | schema completeness | schema 밖 observed role 존재 | preview helper 구현 |
-| `orphan_sidecar_role` | typed-view association | index/sidecar만 있고 primary role 없음 | association preview helper 구현 |
+| `unpaired_index_role` | typed-view pairing | index만 있고 primary role 없음 | pairing preview helper 구현 |
 
 이 vocabulary는 public API schema가 아니다.
 다음 구현 단위를 고르기 위한 internal design vocabulary다.
@@ -135,7 +135,7 @@ extra role은 향후 report 후보지만, 현재 strict error로 승격하지 �
 
 - fixture-specific probe는 typed-view rule이 아니다.
 - `BAM/BAI` schema validation은 다음 구현 후보일 뿐이다.
-- orphan/missing index diagnostics는 아직 public report contract가 아니다.
+- missing-index/unpaired-index diagnostics는 아직 public report contract가 아니다.
 
 ## 6. 다음 구현 단위 결정
 
@@ -178,13 +178,13 @@ Sprint 6의 결론은 validator 구현으로 바로 들어가지 않는 것이�
 두 helper는 같은 입력에서도 다른 `Role` 값을 낼 수 있다.
 예를 들어 BAM-only row에서 observed-key helper는 `bam_bai` missing을 보고하고, typed-role helper는 `BAI` missing을 보고한다.
 
-Sidecar association은 세 번째 층으로 분리한다.
+Primary/index pairing은 세 번째 층으로 분리한다.
 
 - completeness helper는 required typed role presence만 본다.
-- association helper 후보는 primary/sidecar 관계 위반만 본다.
-- `orphan_sidecar_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는다.
-- 설계 기준은 `docs/track_a_sidecar_association_policy_design_v0.1.md`에 둔다.
-- 구현 anchor는 `rules.BuildTypedRoleAssociationPreview`다.
+- pairing helper 후보는 primary/index 관계 위반만 본다.
+- `unpaired_index_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는다.
+- 설계 기준은 `docs/track_a_primary_index_pairing_policy_design_v0.1.md`에 둔다.
+- 구현 anchor는 `rules.BuildPrimaryIndexPairingPreview`다.
 
 ## 7. 비범위
 

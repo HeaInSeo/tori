@@ -184,40 +184,40 @@ func TestSharedFSFixtureSmoke_AlignmentBAMIndexFixtureSpecificCurrentRuleProbe(t
 	if schemaPreview.MissingRequiredRoleCount != 0 || schemaPreview.ExtraObservedRoleCount != 0 || schemaPreview.UnresolvedObservedRoleCount != 0 {
 		t.Fatalf("expected alignment fixture-specific schema preview to have no candidates, got %#v", schemaPreview)
 	}
-	associationPreview := rules.BuildTypedRoleAssociationPreview(preview, "BAM", "BAI")
-	if associationPreview.EntryCount != 0 {
-		t.Fatalf("expected complete alignment fixture association preview to have no candidates, got %#v", associationPreview)
+	pairingPreview := rules.BuildPrimaryIndexPairingPreview(preview, "BAM", "BAI")
+	if pairingPreview.EntryCount != 0 {
+		t.Fatalf("expected complete alignment fixture primary/index pairing preview to have no candidates, got %#v", pairingPreview)
 	}
 	assertNoGeneratedPreviewOutputs(t, workDir)
 
-	orphanBAIFileName := "NA12878_chr21_1x.bam.bai"
-	if _, err := os.Stat(filepath.Join(alignmentDir, orphanBAIFileName)); err != nil {
-		t.Fatalf("expected shared fixture orphan BAI source candidate at %s: %v", filepath.Join(alignmentDir, orphanBAIFileName), err)
+	unpairedBAIFileName := "NA12878_chr21_1x.bam.bai"
+	if _, err := os.Stat(filepath.Join(alignmentDir, unpairedBAIFileName)); err != nil {
+		t.Fatalf("expected shared fixture unpaired BAI index source candidate at %s: %v", filepath.Join(alignmentDir, unpairedBAIFileName), err)
 	}
-	orphanWorkDir := prepareSharedFSFixtureWorkDirWithRuleAndFiles(t, ruleSet, []string{orphanBAIFileName})
-	orphanPreview, err := rules.GenerateResolverPreviewFromDir(orphanWorkDir)
+	unpairedIndexWorkDir := prepareSharedFSFixtureWorkDirWithRuleAndFiles(t, ruleSet, []string{unpairedBAIFileName})
+	unpairedIndexPreview, err := rules.GenerateResolverPreviewFromDir(unpairedIndexWorkDir)
 	if err != nil {
-		t.Fatalf("GenerateResolverPreviewFromDir orphan BAI probe error: %v", err)
+		t.Fatalf("GenerateResolverPreviewFromDir unpaired BAI index probe error: %v", err)
 	}
-	if orphanPreview.SourceFileCount != 1 || orphanPreview.RowCount != 1 || orphanPreview.ObservedRoleCount != 1 || orphanPreview.UnresolvedRoleCount != 0 {
-		t.Fatalf("unexpected orphan BAI preview summary: %#v", orphanPreview)
+	if unpairedIndexPreview.SourceFileCount != 1 || unpairedIndexPreview.RowCount != 1 || unpairedIndexPreview.ObservedRoleCount != 1 || unpairedIndexPreview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected unpaired BAI index preview summary: %#v", unpairedIndexPreview)
 	}
-	if orphanPreview.Rows[0].RoleNormalization[0].ObservedKey != "bam_bai" || orphanPreview.Rows[0].RoleNormalization[0].NormalizedRole != "BAI" {
-		t.Fatalf("unexpected orphan BAI normalization preview: %#v", orphanPreview.Rows[0].RoleNormalization)
+	if unpairedIndexPreview.Rows[0].RoleNormalization[0].ObservedKey != "bam_bai" || unpairedIndexPreview.Rows[0].RoleNormalization[0].NormalizedRole != "BAI" {
+		t.Fatalf("unexpected unpaired BAI index normalization preview: %#v", unpairedIndexPreview.Rows[0].RoleNormalization)
 	}
-	orphanSchemaPreview := rules.BuildSchemaValidationPreview(orphanPreview, ruleSet)
-	if orphanSchemaPreview.MissingRequiredRoleCount != 1 || orphanSchemaPreview.Entries[0].Role != "bam" {
-		t.Fatalf("expected orphan BAI observed-key schema preview to report missing bam, got %#v", orphanSchemaPreview)
+	unpairedIndexSchemaPreview := rules.BuildSchemaValidationPreview(unpairedIndexPreview, ruleSet)
+	if unpairedIndexSchemaPreview.MissingRequiredRoleCount != 1 || unpairedIndexSchemaPreview.Entries[0].Role != "bam" {
+		t.Fatalf("expected unpaired BAI index observed-key schema preview to report missing bam, got %#v", unpairedIndexSchemaPreview)
 	}
-	orphanTypedPreview := rules.BuildTypedRoleValidationPreview(orphanPreview, []string{"BAM", "BAI"})
-	if orphanTypedPreview.MissingRequiredRoleCount != 1 || orphanTypedPreview.Entries[0].Role != "BAM" {
-		t.Fatalf("expected orphan BAI typed-role preview to report missing BAM, got %#v", orphanTypedPreview)
+	unpairedIndexTypedPreview := rules.BuildTypedRoleValidationPreview(unpairedIndexPreview, []string{"BAM", "BAI"})
+	if unpairedIndexTypedPreview.MissingRequiredRoleCount != 1 || unpairedIndexTypedPreview.Entries[0].Role != "BAM" {
+		t.Fatalf("expected unpaired BAI index typed-role preview to report missing BAM, got %#v", unpairedIndexTypedPreview)
 	}
-	orphanAssociationPreview := rules.BuildTypedRoleAssociationPreview(orphanPreview, "BAM", "BAI")
-	if orphanAssociationPreview.EntryCount != 1 || orphanAssociationPreview.Entries[0].ReasonCode != "orphan_sidecar_role" {
-		t.Fatalf("expected orphan BAI association preview candidate, got %#v", orphanAssociationPreview)
+	unpairedIndexPairingPreview := rules.BuildPrimaryIndexPairingPreview(unpairedIndexPreview, "BAM", "BAI")
+	if unpairedIndexPairingPreview.EntryCount != 1 || unpairedIndexPairingPreview.Entries[0].ReasonCode != "unpaired_index_role" {
+		t.Fatalf("expected unpaired BAI index pairing preview candidate, got %#v", unpairedIndexPairingPreview)
 	}
-	assertNoGeneratedPreviewOutputs(t, orphanWorkDir)
+	assertNoGeneratedPreviewOutputs(t, unpairedIndexWorkDir)
 
 	fb, err := GenerateFileBlock(workDir, fileNames)
 	if err != nil {

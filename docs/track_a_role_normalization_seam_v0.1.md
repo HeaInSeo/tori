@@ -35,7 +35,7 @@ Desired typed roles:
 - `BAM`
 - `BAI`
 
-즉 `bam_bai`는 index sidecar를 잘 관찰했지만, canonical role 이름으로는 아직 `BAI`가 아니다.
+즉 `bam_bai`는 index file를 잘 관찰했지만, canonical role 이름으로는 아직 `BAI`가 아니다.
 
 ## 3. 현재 seam 정의
 
@@ -55,14 +55,14 @@ BAM/BAI 후보:
 | Observed key | Normalized role | 비고 |
 |---|---|---|
 | `bam` | `BAM` | primary alignment file |
-| `bam_bai` | `BAI` | BAM index sidecar |
+| `bam_bai` | `BAI` | BAM index file |
 
 CRAM/CRAI 후보:
 
 | Observed key | Normalized role | 비고 |
 |---|---|---|
 | `cram` | `CRAM` | primary alignment file |
-| `cram_crai` | `CRAI` | CRAM index sidecar |
+| `cram_crai` | `CRAI` | CRAM index file |
 
 주의:
 

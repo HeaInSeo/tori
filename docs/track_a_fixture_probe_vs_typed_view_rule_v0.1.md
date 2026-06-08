@@ -32,7 +32,7 @@ Fixture-specific probe는 다음을 확인한다.
 - canonical row identity 정책
 - general BAM/BAI typed-view schema
 - role normalization 구현
-- missing/orphan index diagnostics contract
+- missing/unpaired index diagnostics contract
 
 ## 3. Typed-view rule
 
@@ -43,8 +43,8 @@ Alignment/index typed-view rule 후보가 다뤄야 할 것:
 - role schema: `BAM`, `BAI`
 - role cardinality: required one
 - row identity 후보: alignment stem
-- sidecar association: `.bam.bai`는 `.bam`의 index
-- duplicate/missing/orphan 판단 위치
+- primary/index pairing: `.bam.bai`는 `.bam`의 index
+- duplicate/missing/unpaired-index 판단 위치
 - role normalization: observed key에서 typed role로의 변환
 
 이것은 아직 구현되지 않았다.
@@ -57,7 +57,7 @@ Alignment/index typed-view rule 후보가 다뤄야 할 것:
 
 - `NA12878_chr21_1x`는 fixture row key이지 모든 alignment row key의 형식이 아니다.
 - `bam_bai`는 current tokenizer가 만든 observed key이지 canonical role이 아니다.
-- `.bam.bai` sidecar는 BAM에는 자연스럽지만, CRAM/CRAI나 다른 index naming에는 별도 규칙이 필요할 수 있다.
+- ``.bam.bai` index file는 BAM에는 자연스럽지만, CRAM/CRAI나 다른 index naming에는 별도 규칙이 필요할 수 있다.
 
 따라서 fixture probe는 "관찰 결과"로 유지하고, typed-view rule은 별도 설계 단위로 다룬다.
 

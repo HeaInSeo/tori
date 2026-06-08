@@ -812,7 +812,7 @@ func TestBuildTypedRoleValidationPreview_StaysSeparateFromObservedKeySchemaPrevi
 	}
 }
 
-func TestBuildTypedRoleAssociationPreview_BAIOnlyReportsOrphanSidecar(t *testing.T) {
+func TestBuildPrimaryIndexPairingPreview_BAIOnlyReportsUnpairedIndex(t *testing.T) {
 	files := []string{
 		"NA12878_chr21_1x.bam.bai",
 	}
@@ -831,21 +831,21 @@ func TestBuildTypedRoleAssociationPreview_BAIOnlyReportsOrphanSidecar(t *testing
 	if err != nil {
 		t.Fatalf("GenerateResolverPreview error: %v", err)
 	}
-	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+	got := BuildPrimaryIndexPairingPreview(resolverPreview, "BAM", "BAI")
 
 	if got.EntryCount != 1 {
-		t.Fatalf("expected one association preview entry, got %#v", got)
+		t.Fatalf("expected one pairing preview entry, got %#v", got)
 	}
 	entry := got.Entries[0]
-	if entry.ReasonCode != "orphan_sidecar_role" || entry.Role != "BAI" {
-		t.Fatalf("expected orphan BAI sidecar entry, got %#v", entry)
+	if entry.ReasonCode != "unpaired_index_role" || entry.Role != "BAI" {
+		t.Fatalf("expected unpaired BAI index entry, got %#v", entry)
 	}
 	if entry.ObservedKey != "bam_bai" || entry.NormalizedRole != "BAI" || entry.FileName == "" {
-		t.Fatalf("expected sidecar source context to be preserved, got %#v", entry)
+		t.Fatalf("expected index source context to be preserved, got %#v", entry)
 	}
 }
 
-func TestBuildTypedRoleAssociationPreview_BAMOnlyHasNoAssociationEntry(t *testing.T) {
+func TestBuildPrimaryIndexPairingPreview_BAMOnlyHasNoPairingEntry(t *testing.T) {
 	files := []string{
 		"NA12878_chr21_1x.bam",
 	}
@@ -864,14 +864,14 @@ func TestBuildTypedRoleAssociationPreview_BAMOnlyHasNoAssociationEntry(t *testin
 	if err != nil {
 		t.Fatalf("GenerateResolverPreview error: %v", err)
 	}
-	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+	got := BuildPrimaryIndexPairingPreview(resolverPreview, "BAM", "BAI")
 
 	if got.EntryCount != 0 {
-		t.Fatalf("expected no association preview entries for BAM-only row, got %#v", got)
+		t.Fatalf("expected no pairing preview entries for BAM-only row, got %#v", got)
 	}
 }
 
-func TestBuildTypedRoleAssociationPreview_BAMBAICompleteHasNoAssociationEntry(t *testing.T) {
+func TestBuildPrimaryIndexPairingPreview_BAMBAICompleteHasNoPairingEntry(t *testing.T) {
 	files := []string{
 		"NA12878_chr21_1x.bam",
 		"NA12878_chr21_1x.bam.bai",
@@ -891,10 +891,10 @@ func TestBuildTypedRoleAssociationPreview_BAMBAICompleteHasNoAssociationEntry(t 
 	if err != nil {
 		t.Fatalf("GenerateResolverPreview error: %v", err)
 	}
-	got := BuildTypedRoleAssociationPreview(resolverPreview, "BAM", "BAI")
+	got := BuildPrimaryIndexPairingPreview(resolverPreview, "BAM", "BAI")
 
 	if got.EntryCount != 0 {
-		t.Fatalf("expected no association preview entries for complete BAM/BAI row, got %#v", got)
+		t.Fatalf("expected no pairing preview entries for complete BAM/BAI row, got %#v", got)
 	}
 }
 

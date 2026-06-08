@@ -90,7 +90,7 @@
 - 파일 크기
 - 수정 시각
 - digest(있다면)
-- 확장 메타 소스(샘플시트, sidecar, manifest)
+- 확장 메타 소스(샘플시트, companion file, manifest)
 
 v0.1 범위에서는 최소 입력을 **파일명 리스트**로 본다.
 

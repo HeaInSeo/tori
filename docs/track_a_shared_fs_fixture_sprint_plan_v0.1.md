@@ -150,7 +150,7 @@
 권장:
 
 - 첫 후보는 `alignment + index`로 둔다.
-- 이유는 파일+sidecar 관계가 선명하고, pair-end보다 작은 multi-role 확장 단위로 다루기 쉽기 때문이다.
+- 이유는 primary/index 관계가 선명하고, pair-end보다 작은 multi-role 확장 단위로 다루기 쉽기 때문이다.
 
 성공 기준:
 
@@ -261,7 +261,7 @@
 
 - current preview summary field와 validation/report field를 분리해서 문서화한다.
 - `UnresolvedRoleCount`가 warning, invalid, extra 중 무엇으로 해석될 수 있는지 후보를 정리한다.
-- pair-end missing-role과 BAM/BAI orphan/missing index를 같은 validation vocabulary로 표현할 수 있는지 검토한다.
+- pair-end missing-role과 BAM/BAI missing-index/unpaired-index를 같은 validation vocabulary로 표현할 수 있는지 검토한다.
 
 성공 기준:
 
@@ -374,7 +374,7 @@
 목표:
 
 - BAM/BAI fixture probe에 schema validation preview helper를 연결할지 결정한다.
-- `BAM/BAI` typed-view general rule로 넘어가기 전, fixture-specific rule에서 missing/orphan 후보를 어떻게 관찰할지 정리한다.
+- `BAM/BAI` typed-view general rule로 넘어가기 전, fixture-specific rule에서 missing/unpaired-index 후보를 어떻게 관찰할지 정리한다.
 
 비목표:
 
@@ -385,7 +385,7 @@
 작업:
 
 - 현재 BAM/BAI probe의 `roleNormalization` 결과와 schema validation preview 후보가 충돌하지 않는지 확인한다.
-- orphan sidecar 후보를 구현할지, 문서 후보로만 둘지 결정한다.
+- unpaired index 후보를 구현할지, 문서 후보로만 둘지 결정한다.
 - missing BAM 또는 missing BAI fixture가 필요한지 산정한다.
 
 성공 기준:
@@ -419,7 +419,7 @@
 
 - FileBlock cell key를 normalized role로 바꾸지 않는다.
 - shared filesystem fixture pack을 변경하지 않는다.
-- orphan sidecar policy를 public diagnostics로 승격하지 않는다.
+- unpaired index policy를 public diagnostics로 승격하지 않는다.
 
 작업:
 
@@ -446,7 +446,7 @@
 - BAM-only synthetic case는 `missing_required_role` for `BAI` 후보를 낸다.
 - observed-key `BuildSchemaValidationPreview`와 typed-role helper가 같은 입력에서 서로 다른 role vocabulary를 쓰는 경계를 테스트로 고정했다.
 
-## Sprint 11 - Orphan Sidecar Policy Boundary
+## Sprint 11 - Unpaired Index Policy Boundary
 
 예상 기간:
 
@@ -454,7 +454,7 @@
 
 목표:
 
-- `BAI` only row를 단순 missing primary로 볼지, sidecar-specific orphan 후보로 볼지 결정한다.
+- `BAI` only row를 단순 missing primary로 볼지, unpaired index 후보로 볼지 결정한다.
 - 결정 전에는 public diagnostics/report surface로 승격하지 않는다.
 
 비목표:
@@ -467,7 +467,7 @@
 
 - `BAI` only synthetic case를 현재 helper로 관찰한다.
 - `missing_required_role` for `BAM`만으로 충분한지 평가한다.
-- `orphan_sidecar_role`이 필요하면 별도 helper vocabulary로 분리할지 문서화한다.
+- `unpaired_index_role`이 필요하면 별도 helper vocabulary로 분리할지 문서화한다.
 
 성공 기준:
 
@@ -482,10 +482,10 @@
 
 - `BAI` only synthetic case를 typed-role validation preview 테스트로 고정했다.
 - 현재 helper는 `missing_required_role` for `BAM`을 반환한다.
-- 이 결과는 typed role completeness preview로 유지하고, `orphan_sidecar_role`은 아직 구현하지 않는다.
-- orphan sidecar는 sidecar association rule이 필요하므로 completeness helper와 분리한다.
+- 이 결과는 typed role completeness preview로 유지하고, `unpaired_index_role`은 아직 구현하지 않는다.
+- unpaired index는 primary/index pairing rule이 필요하므로 completeness helper와 분리한다.
 
-## Sprint 12 - Sidecar Association Policy Design
+## Sprint 12 - Primary/Index Pairing Policy Design
 
 예상 기간:
 
@@ -493,8 +493,8 @@
 
 목표:
 
-- `BAM/BAI`처럼 primary/index 관계가 있는 typed view에서 association violation을 어떻게 표현할지 설계한다.
-- completeness missing과 sidecar association violation을 섞지 않는다.
+- `BAM/BAI`처럼 primary/index 관계가 있는 typed view에서 pairing violation을 어떻게 표현할지 설계한다.
+- completeness missing과 primary/index pairing violation을 섞지 않는다.
 
 비목표:
 
@@ -504,8 +504,8 @@
 
 작업:
 
-- primary role과 sidecar role vocabulary를 문서상 정의한다.
-- `orphan_sidecar_role`이 필요한 조건을 정한다.
+- primary role과 index role vocabulary를 문서상 정의한다.
+- `unpaired_index_role`이 필요한 조건을 정한다.
 - helper 추가가 필요하면 `BuildTypedRoleValidationPreview`와 별도 함수로 둘지 결정한다.
 
 성공 기준:
@@ -519,13 +519,13 @@
 
 완료 메모:
 
-- `docs/track_a_sidecar_association_policy_design_v0.1.md`를 추가했다.
-- primary role은 `BAM`, sidecar role은 `BAI`로 문서상 정의했다.
-- `orphan_sidecar_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는 것으로 결정했다.
-- 다음 구현 후보는 별도 association preview helper로 산정했다.
+- `docs/track_a_primary_index_pairing_policy_design_v0.1.md`를 추가했다.
+- primary role은 `BAM`, index role은 `BAI`로 문서상 정의했다.
+- `unpaired_index_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는 것으로 결정했다.
+- 다음 구현 후보는 별도 pairing preview helper로 산정했다.
 - shared filesystem fixture pack 변경은 helper semantics가 synthetic test로 닫힌 뒤로 미뤘다.
 
-## Sprint 13 - Typed Role Association Preview Helper
+## Sprint 13 - Typed Role Pairing Preview Helper
 
 예상 기간:
 
@@ -533,8 +533,8 @@
 
 목표:
 
-- sidecar association violation을 completeness preview와 분리한 helper로 관찰한다.
-- `BAI` only synthetic case에서 `orphan_sidecar_role` 후보를 낸다.
+- primary/index pairing violation을 completeness preview와 분리한 helper로 관찰한다.
+- `BAI` only synthetic case에서 `unpaired_index_role` 후보를 낸다.
 
 비목표:
 
@@ -544,10 +544,10 @@
 
 작업:
 
-- association preview entry/result 타입을 기존 preview 타입으로 재사용할지 결정한다.
-- `BuildTypedRoleAssociationPreview` 후보를 구현한다.
-- `BAI` only synthetic case는 `orphan_sidecar_role`을 낸다.
-- `BAM` only synthetic case는 association entry를 내지 않는다.
+- pairing preview entry/result 타입을 기존 preview 타입으로 재사용할지 결정한다.
+- `BuildPrimaryIndexPairingPreview` 후보를 구현한다.
+- `BAI` only synthetic case는 `unpaired_index_role`을 낸다.
+- `BAM` only synthetic case는 pairing entry를 내지 않는다.
 
 성공 기준:
 
@@ -561,13 +561,13 @@
 
 완료 메모:
 
-- `rules.BuildTypedRoleAssociationPreview`를 추가했다.
-- 기존 `SchemaValidationPreview` 타입을 재사용하되 reason code는 `orphan_sidecar_role`로 분리했다.
-- `BAI` only synthetic case는 `orphan_sidecar_role`을 낸다.
-- `BAM` only synthetic case와 complete `BAM/BAI` synthetic case는 association entry를 내지 않는다.
+- `rules.BuildPrimaryIndexPairingPreview`를 추가했다.
+- 기존 `SchemaValidationPreview` 타입을 재사용하되 reason code는 `unpaired_index_role`로 분리했다.
+- `BAI` only synthetic case는 `unpaired_index_role`을 낸다.
+- `BAM` only synthetic case와 complete `BAM/BAI` synthetic case는 pairing entry를 내지 않는다.
 - `BuildTypedRoleValidationPreview`의 current completeness semantics는 유지했다.
 
-## Sprint 14 - Association Preview Fixture Connection Decision
+## Sprint 14 - Pairing Preview Fixture Connection Decision
 
 예상 기간:
 
@@ -575,7 +575,7 @@
 
 목표:
 
-- association preview를 shared filesystem smoke에 연결할지, orphan fixture 추가 전까지 synthetic anchor로 둘지 결정한다.
+- pairing preview를 shared filesystem smoke에 연결할지, unpaired index fixture 추가 전까지 synthetic anchor로 둘지 결정한다.
 
 비목표:
 
@@ -585,9 +585,9 @@
 
 작업:
 
-- current complete BAM/BAI shared fixture에 association preview를 연결할 수 있는지 확인한다.
-- missing/orphan fixture 없이 positive-only smoke를 추가할 가치가 있는지 판단한다.
-- orphan fixture 추가가 필요하면 fixture 이름, expected result, manifest 갱신 범위를 산정한다.
+- current complete BAM/BAI shared fixture에 pairing preview를 연결할 수 있는지 확인한다.
+- missing/unpaired index fixture 없이 positive-only smoke를 추가할 가치가 있는지 판단한다.
+- unpaired index fixture 추가가 필요하면 fixture 이름, expected result, manifest 갱신 범위를 산정한다.
 
 성공 기준:
 
@@ -600,12 +600,12 @@
 
 완료 메모:
 
-- complete BAM/BAI shared filesystem fixture에 association preview positive smoke를 연결했다.
-- 해당 fixture는 `BuildTypedRoleAssociationPreview(preview, "BAM", "BAI")` 결과가 entry 0개임을 확인한다.
-- orphan sidecar negative coverage는 shared fixture가 아직 없으므로 synthetic test anchor에 유지한다.
+- complete BAM/BAI shared filesystem fixture에 pairing preview positive smoke를 연결했다.
+- 해당 fixture는 `BuildPrimaryIndexPairingPreview(preview, "BAM", "BAI")` 결과가 entry 0개임을 확인한다.
+- unpaired index negative coverage는 shared fixture가 아직 없으므로 synthetic test anchor에 유지한다.
 - fixture manifest/checksum 변경은 하지 않았다.
 
-## Sprint 15 - Orphan Alignment Fixture Addition Decision
+## Sprint 15 - Unpaired Index Alignment Fixture Addition Decision
 
 예상 기간:
 
@@ -613,7 +613,7 @@
 
 목표:
 
-- `alignment_bam_orphan_index` shared fixture를 추가할지 결정한다.
+- `alignment_bam_unpaired_index` shared fixture를 추가할지 결정한다.
 - fixture 추가 시 expected preview/result와 manifest/checksum 갱신 범위를 산정한다.
 
 비목표:
@@ -624,7 +624,7 @@
 
 작업:
 
-- orphan fixture가 Track A regression anchor로 필요한지 판단한다.
+- unpaired index fixture가 Track A regression anchor로 필요한지 판단한다.
 - fixture 이름과 파일 목록을 확정한다.
 - 추가한다면 shared filesystem fixture pack manifest/checksum 갱신 절차를 실행한다.
 
@@ -639,8 +639,8 @@
 
 완료 메모:
 
-- `alignment_bam_orphan_index` shared fixture는 내일 마감 범위에서 추가하지 않기로 결정했다.
-- orphan sidecar coverage는 `rules.BuildTypedRoleAssociationPreview` synthetic test anchor에 유지한다.
+- `alignment_bam_unpaired_index` shared fixture는 내일 마감 범위에서 추가하지 않기로 결정했다.
+- unpaired index coverage는 `rules.BuildPrimaryIndexPairingPreview` synthetic test anchor에 유지한다.
 - shared filesystem fixture pack은 complete BAM/BAI positive smoke까지만 유지한다.
 - fixture manifest/checksum 변경은 마감 후 fixture expansion sprint로 보류한다.
 
@@ -658,7 +658,7 @@
 비목표:
 
 - 새 shared filesystem fixture를 추가하지 않는다.
-- CRAM/CRAI, VCF/CSI, reference sidecar generalization을 시작하지 않는다.
+- CRAM/CRAI, VCF/CSI, reference index pairing generalization을 시작하지 않는다.
 - public diagnostics/report/protobuf 변경을 하지 않는다.
 - service/gRPC/K8s/runtime 영역을 복구하지 않는다.
 
@@ -672,7 +672,7 @@
 성공 기준:
 
 - core/shared fixture gate가 green이다.
-- pair-end regression, BAM/BAI preview, sidecar association preview가 문서와 테스트에서 일치한다.
+- pair-end regression, BAM/BAI preview, primary/index pairing preview가 문서와 테스트에서 일치한다.
 - 내일 이후 fixture expansion 후보가 별도 다음 단계로 남는다.
 
 현재 상태:
@@ -703,10 +703,10 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 - BAM/BAI fixture-specific observed-key schema preview와 typed-role validation 후보 경계가 문서화됨
 - typed-role validation preview helper가 synthetic BAM/BAI complete/missing case로 고정됨
 - BAI-only synthetic case가 current completeness preview로 고정됨
-- sidecar association policy boundary가 문서로 분리됨
-- typed-role association preview helper가 synthetic case로 고정됨
-- complete BAM/BAI shared fixture에 association positive smoke가 연결됨
-- orphan alignment shared fixture 추가는 내일 마감 범위에서 보류됨
+- primary/index pairing policy boundary가 문서로 분리됨
+- typed-role pairing preview helper가 synthetic case로 고정됨
+- complete BAM/BAI shared fixture에 pairing positive smoke가 연결됨
+- unpaired index alignment shared fixture 추가는 내일 마감 범위에서 보류됨
 
 현재 다음 작업:
 
@@ -716,21 +716,21 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 - schema validation preview helper는 `rules.BuildSchemaValidationPreview`로 구현했다.
 - shared filesystem validation preview smoke는 pair-end valid/missing fixture에 연결했다.
 - typed-role validation preview helper는 `rules.BuildTypedRoleValidationPreview`로 구현했다.
-- orphan sidecar는 아직 구현하지 않고 sidecar association policy design으로 분리했다.
-- 다음 구현 후보는 `BuildTypedRoleAssociationPreview`다.
-- typed-role association preview helper는 `rules.BuildTypedRoleAssociationPreview`로 구현했다.
-- complete BAM/BAI shared fixture에 association preview positive smoke를 연결했다.
-- orphan alignment shared fixture 추가는 synthetic anchor 유지로 보류했다.
+- unpaired index는 아직 구현하지 않고 primary/index pairing policy design으로 분리했다.
+- 다음 구현 후보는 `BuildPrimaryIndexPairingPreview`다.
+- typed-role pairing preview helper는 `rules.BuildPrimaryIndexPairingPreview`로 구현했다.
+- complete BAM/BAI shared fixture에 pairing preview positive smoke를 연결했다.
+- unpaired index alignment shared fixture 추가는 synthetic anchor 유지로 보류했다.
 - BAM/BAI alignment index validation preview 후보 결정은 `docs/track_a_alignment_index_validation_preview_candidate_v0.1.md`에 문서화했다.
 - 내일 마감 기준 다음 구현은 하지 않고 최종 검증과 보고를 우선한다.
 - CRAM/CRAI probe와 validator 구현은 마감 이후로 미룬다.
-- 마감 후 첫 follow-up으로 existing BAI filename을 이용한 temp workdir orphan smoke를 추가했다.
+- 마감 후 첫 follow-up으로 existing BAI filename을 이용한 temp workdir unpaired index smoke를 추가했다.
 - 이 follow-up은 shared fixture pack manifest/checksum을 변경하지 않는다.
 
 다음 작은 결정:
 
-- 2026-06-06 마감 후 `alignment_bam_orphan_index` fixture 추가 여부를 재검토한다.
-- fixture를 추가한다면 manifest/checksum 갱신과 real orphan fixture smoke 연결을 같은 작은 sprint로 묶는다.
+- 2026-06-06 마감 후 `alignment_bam_unpaired_index` fixture 추가 여부를 재검토한다.
+- fixture를 추가한다면 manifest/checksum 갱신과 real unpaired index fixture smoke 연결을 같은 작은 sprint로 묶는다.
 - normalization map은 v0.1에서 rule spec 쪽에 둔다는 기존 결정은 유지한다.
 - current `RoleKey`는 observed key 의미를 유지한다는 기존 결정은 유지한다.
 

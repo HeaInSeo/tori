@@ -15,9 +15,9 @@
 
 이유:
 
-- BAM/BAI와 CRAM/CRAI는 파일+sidecar 관계가 명확하다.
-- pair-end의 `R1/R2`처럼 2-role 구조를 가지지만, read pair가 아니라 primary file + index sidecar 관계다.
-- multi-role 일반화 전체로 바로 가지 않고도 role cardinality, sidecar association, missing index를 작게 볼 수 있다.
+- BAM/BAI와 CRAM/CRAI는 primary/index 관계가 명확하다.
+- pair-end의 `R1/R2`처럼 2-role 구조를 가지지만, read pair가 아니라 primary file + index file 관계다.
+- multi-role 일반화 전체로 바로 가지 않고도 role cardinality, primary/index pairing, missing index를 작게 볼 수 있다.
 - 현재 shared filesystem fixture pack에 이미 작은 public fixture가 있다.
 
 ## 3. 현재 fixture
@@ -74,9 +74,9 @@ CRAM/CRAI probe의 최소 role 후보:
 - 동일 row key에 `BAM`이 2개 이상이면 duplicate collision 후보다.
 - 동일 row key에 `BAI`가 2개 이상이면 duplicate collision 후보다.
 - `BAM`만 있고 `BAI`가 없으면 missing index 관찰 후보다.
-- `BAI`만 있고 `BAM`이 없으면 orphan index 관찰 후보다.
+- `BAI`만 있고 `BAM`이 없으면 unpaired index 관찰 후보다.
 
-단, missing/orphan을 public diagnostics contract로 승격하지 않는다.
+단, missing/unpaired-index을 public diagnostics contract로 승격하지 않는다.
 Sprint 4에서는 probe 수준의 관찰과 테스트 경계만 확인한다.
 
 ## 7. 비범위

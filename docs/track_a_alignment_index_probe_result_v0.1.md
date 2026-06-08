@@ -63,7 +63,7 @@ Observed columns:
 - CRAM/CRAI probe
 - role normalization 구현
 - schema-based validator 구현
-- missing/orphan index diagnostics contract
+- missing/unpaired-index diagnostics contract
 - BAM 파일 내용 파싱
 - runtime/binding/service 확장
 

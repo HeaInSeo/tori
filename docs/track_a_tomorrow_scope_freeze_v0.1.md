@@ -20,16 +20,16 @@
 - observed-key schema validation preview helper
 - typed-role validation preview helper
 - BAM/BAI role normalization preview
-- typed-role association preview helper
-- complete BAM/BAI shared fixture positive association smoke
+- typed-role pairing preview helper
+- complete BAM/BAI shared fixture positive pairing smoke
 
 ## 3. 보류 범위
 
 마감 제외 범위:
 
-- `alignment_bam_orphan_index` shared fixture 추가
+- `alignment_bam_unpaired_index` shared fixture 추가
 - fixture manifest/checksum 변경
-- CRAM/CRAI association generalization
+- CRAM/CRAI pairing generalization
 - VCF/CSI, BCF/CSI, FASTA/FAI typed-view generalization
 - public diagnostics/report/protobuf 변경
 - FileBlock output key normalization
@@ -50,8 +50,8 @@ make test-shared-fs-fixtures
 
 남은 리스크:
 
-- shared filesystem fixture pack에는 orphan BAM index negative case가 없다.
-- `orphan_sidecar_role`은 현재 synthetic test anchor로만 검증된다.
+- shared filesystem fixture pack에는 unpaired BAM index negative case가 없다.
+- `unpaired_index_role`은 현재 synthetic test anchor로만 검증된다.
 - current BAM/BAI fixture rule은 fixture-specific observed-key rule이며 general typed-view rule이 아니다.
 - dirty worktree에는 Track A 직접 범위 밖 변경이 함께 존재한다.
 
@@ -59,7 +59,7 @@ make test-shared-fs-fixtures
 
 마감 이후 첫 후보:
 
-- `alignment_bam_orphan_index` fixture 추가 여부 재검토
+- `alignment_bam_unpaired_index` fixture 추가 여부 재검토
 - manifest/checksum 갱신 절차 실행
-- association preview를 orphan shared fixture smoke에 연결
+- pairing preview를 unpaired index shared fixture smoke에 연결
 - 그 다음 CRAM/CRAI로 확장 여부 판단

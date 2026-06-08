@@ -35,9 +35,9 @@ BAM/BAI probe의 `Header`는 typed role이 아니라 observed key다.
 
 - typed role `BAM` required one
 - typed role `BAI` required one
-- `BAI` only row를 orphan index로 분류
+- `BAI` only row를 unpaired index로 분류
 - `BAM` only row를 missing index로 분류
-- CRAM/CRAI sidecar association
+- CRAM/CRAI primary/index pairing
 
 ## 4. 다음 후보
 
@@ -45,17 +45,17 @@ BAM/BAI probe의 `Header`는 typed role이 아니라 observed key다.
 
 ### 후보 A: fixture 추가
 
-Shared filesystem fixture pack에 missing/orphan BAM/BAI fixture를 추가한다.
+Shared filesystem fixture pack에 missing/unpaired-index BAM/BAI fixture를 추가한다.
 
 예:
 
 - `alignment_bam_missing_index/NA12878_chr21_1x.bam`
-- `alignment_bam_orphan_index/NA12878_chr21_1x.bam.bai`
+- `alignment_bam_unpaired_index/NA12878_chr21_1x.bam.bai`
 
 장점:
 
 - real-data regression anchor가 먼저 생긴다.
-- public fixture 기준으로 missing/orphan 관찰을 고정할 수 있다.
+- public fixture 기준으로 missing/unpaired-index 관찰을 고정할 수 있다.
 
 단점:
 
@@ -68,7 +68,7 @@ Shared filesystem fixture pack에 missing/orphan BAM/BAI fixture를 추가한다
 예:
 
 - observed key를 normalized role로 투영한다.
-- typed role header 후보 `BAM`, `BAI`를 입력받아 missing/orphan 후보를 계산한다.
+- typed role header 후보 `BAM`, `BAI`를 입력받아 missing/unpaired-index 후보를 계산한다.
 
 장점:
 
@@ -85,7 +85,7 @@ Sprint 9의 결정은 **후보 B를 먼저 진행**하는 것이다.
 
 이유:
 
-- 현재 fixture는 complete BAM/BAI pair 하나뿐이라 missing/orphan을 real fixture로 바로 검증할 수 없다.
+- 현재 fixture는 complete BAM/BAI pair 하나뿐이라 missing/unpaired-index을 real fixture로 바로 검증할 수 없다.
 - typed role validation helper는 synthetic case로 작게 고정할 수 있다.
 - fixture 추가는 helper의 vocabulary가 닫힌 뒤 진행하는 편이 manifest/checksum churn을 줄인다.
 
@@ -96,12 +96,12 @@ Sprint 10의 가장 작은 구현 단위:
 - `rules` 계층에 typed-role schema validation preview helper를 추가한다.
 - 입력은 `ResolverPreview`와 typed role header 후보로 제한한다.
 - `BAM` only synthetic case는 `missing_required_role` for `BAI` 후보를 낸다.
-- `BAI` only synthetic case는 `missing_required_role` for `BAM` 또는 별도 `orphan_sidecar_role` 후보 중 하나로 문서 기준을 먼저 따른다.
+- `BAI` only synthetic case는 `missing_required_role` for `BAM` 또는 별도 `unpaired_index_role` 후보 중 하나로 문서 기준을 먼저 따른다.
 
 권장:
 
 - 첫 구현은 `missing_required_role`까지만 둔다.
-- `orphan_sidecar_role`은 sidecar association rule이 필요하므로 다음 하위 단계로 미룬다.
+- `unpaired_index_role`은 primary/index pairing rule이 필요하므로 다음 하위 단계로 미룬다.
 
 ## 7. Sprint 10 구현 결과
 
@@ -127,28 +127,28 @@ Sprint 11에서 `BAI` only synthetic case를 관찰한다.
 
 - `BAI` only row는 `missing_required_role` for `BAM` entry를 낸다.
 - 이 결과는 typed role completeness 관찰로는 충분하다.
-- 하지만 이 결과만으로 `orphan_sidecar_role`을 public/report vocabulary로 승격하지 않는다.
+- 하지만 이 결과만으로 `unpaired_index_role`을 public/report vocabulary로 승격하지 않는다.
 
 이유:
 
-- orphan 판단은 `BAI`가 어떤 `BAM`의 sidecar인지에 대한 association rule이 필요하다.
+- unpaired index 판단은 `BAI`가 어떤 `BAM`의 index role인지에 대한 pairing rule이 필요하다.
 - 현재 resolver preview는 row-local typed role presence만 본다.
-- sidecar association rule 없이 `orphan_sidecar_role`을 추가하면 completeness와 association violation이 섞인다.
+- primary/index pairing rule 없이 `unpaired_index_role`을 추가하면 completeness와 pairing violation이 섞인다.
 
-Sprint 12 결정은 `docs/track_a_sidecar_association_policy_design_v0.1.md`에 분리했다.
+Sprint 12 결정은 `docs/track_a_primary_index_pairing_policy_design_v0.1.md`에 분리했다.
 
 결정:
 
-- `orphan_sidecar_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는다.
-- 다음 구현 후보는 별도 association preview helper다.
+- `unpaired_index_role`은 `BuildTypedRoleValidationPreview`에 넣지 않는다.
+- 다음 구현 후보는 별도 pairing preview helper다.
 - `BAM` only의 missing `BAI`는 completeness helper에 남긴다.
-- `BAI` only의 orphan 후보는 association helper에서만 낸다.
+- `BAI` only의 unpaired index 후보는 pairing helper에서만 낸다.
 
 다음 후보는 아직 구현하지 않는다.
 
-- `BAI` only row를 단순 `missing_required_role` for `BAM`으로 둘지, `orphan_sidecar_role`로 분류할지 결정
+- `BAI` only row를 단순 `missing_required_role` for `BAM`으로 둘지, `unpaired_index_role`로 분류할지 결정
 - typed role duplicate collision
-- fixture pack에 missing/orphan alignment fixture 추가
+- fixture pack에 missing/unpaired-index alignment fixture 추가
 
 ## 9. 비범위
 
