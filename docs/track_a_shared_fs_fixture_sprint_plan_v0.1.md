@@ -4,10 +4,10 @@
 
 ## 1. 목적
 
-이 문서는 현재 NAS에 수집된 fixture 결과를 Track A 진행 일정으로 전환하되, 같은 검증 방식을 Lustre 같은 shared filesystem에도 적용하기 위한 스프린트 계획이다.
+이 문서는 현재 NAS에 수집된 fixture 결과를 Track A 진행 일정으로 전환하기 위한 스프린트 계획이다.
 
 현재 fixture pack은 NAS 경로인 `/mnt/genomics-test/tori-public-fixtures`에 있다.
-이 경로는 현재 제공 위치일 뿐이며, 검증 모델은 NAS 전용이 아니라 Lustre/NFS 등 shared filesystem snapshot fixture에 적용되어야 한다.
+현재 실행 기준은 NAS다. Lustre/NFS 적용은 fixture mount가 준비된 뒤 같은 smoke contract로 재검증한다.
 유전체 fixture 파일은 저장소나 원격 테스트 장비 로컬 저장소로 복사하지 않는다.
 
 관련 입력 문서:
@@ -683,7 +683,7 @@
 
 현재 NAS fixture 수집은 완료된 입력으로 본다.
 
-다만 이 입력은 NAS 전용 기준이 아니라 Lustre에도 적용해야 하는 shared filesystem fixture 기준선으로 해석한다.
+현재 실행 기준은 NAS로 제한한다. Lustre 적용은 fixture mount 준비 전까지 후순위 보류다.
 repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫았고, Sprint 5에서 read-only resolver preview boundary까지 고정했다.
 
 ## 4. 다음 작업
@@ -723,14 +723,14 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 - unpaired index alignment shared fixture 추가는 Sprint 17 follow-up에서 완료했다.
 - BAM/BAI alignment index validation preview 후보 결정은 `docs/track_a_alignment_index_validation_preview_candidate_v0.1.md`에 문서화했다.
 - 내일 마감 기준 다음 구현은 하지 않고 최종 검증과 보고를 우선한다.
-- CRAM/CRAI probe와 validator 구현은 마감 이후로 미룬다.
+- CRAM/CRAI complete fixture probe는 NAS smoke에 연결했다.
 - 마감 후 첫 follow-up으로 existing BAI filename을 이용한 temp workdir unpaired index smoke를 추가했다.
 - 이후 Sprint 17 follow-up에서 `alignment_bam_unpaired_index/` real fixture를 추가하고 manifest/checksum을 갱신했다.
 - shared filesystem smoke는 이제 real unpaired index fixture directory를 읽는다.
 
 다음 작은 결정:
 
-- 다음 후보는 CRAM/CRAI primary/index pairing probe 여부를 결정하는 것이다.
+- 다음 후보는 VCF/CSI, BCF/CSI, FASTA/FAI 중 어느 primary/index pairing probe를 먼저 볼지 결정하는 것이다.
 - normalization map은 v0.1에서 rule spec 쪽에 둔다는 기존 결정은 유지한다.
 - current `RoleKey`는 observed key 의미를 유지한다는 기존 결정은 유지한다.
 

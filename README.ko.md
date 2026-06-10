@@ -24,7 +24,7 @@
 
 ## 명령
 - `make test-core`: 코어 baseline 테스트와 external `api-protos` 제거 guardrail 실행
-- `make test-shared-fs-fixtures`: `TORI_SHARED_FIXTURE_ROOT` 기준 shared filesystem fixture smoke 테스트 실행(기본값: `/mnt/genomics-test/tori-public-fixtures`; 현재는 NAS, Lustre에도 적용)
+- `make test-shared-fs-fixtures`: `TORI_SHARED_FIXTURE_ROOT` 기준 shared filesystem fixture smoke 테스트 실행(기본값: `/mnt/genomics-test/tori-public-fixtures`; 현재는 NAS만 활성, Lustre는 fixture mount 준비 전까지 보류)
 - `make test-nas-fixtures`: shared filesystem fixture smoke 테스트의 호환 alias
 - `make lint`: 코어+cmd 범위 fail gate
 - `make lint-security`: 코어 범위 보안 관찰(report-only, `sqlclosecheck`/`gosec`)

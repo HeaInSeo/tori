@@ -91,3 +91,9 @@ make test-shared-fs-fixtures
 - `alignment_bam_unpaired_index` fixture를 추가했다.
 - NAS fixture manifest/checksum을 갱신했다.
 - unpaired index shared smoke는 실제 fixture directory 기반으로 승격되었다.
+
+2026-06-10 CRAM/CRAI follow-up:
+
+- NAS 기준 `alignment_cram/` complete fixture smoke를 추가했다.
+- complete CRAM/CRAI는 primary/index pairing entry를 내지 않는 것으로 고정했다.
+- Lustre 검증은 fixture mount 준비 전까지 후순위 보류다.

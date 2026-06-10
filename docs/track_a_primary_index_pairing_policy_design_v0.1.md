@@ -168,9 +168,15 @@ Sprint 17 follow-up:
 - shared filesystem smoke는 temp-only filename anchor가 아니라 실제 `alignment_bam_unpaired_index/` fixture directory를 읽는다.
 - `unpaired_index_role` negative coverage는 shared fixture anchored smoke로 승격되었다.
 
+Sprint 18 follow-up:
+
+- NAS 기준 `alignment_cram/` complete fixture를 shared filesystem smoke에 연결했다.
+- `cram -> CRAM`, `cram_crai -> CRAI` role normalization preview를 확인한다.
+- complete `CRAM` + `CRAI` fixture는 primary/index pairing entry를 내지 않는다.
+- Lustre 검증은 fixture mount 준비 전까지 보류한다.
+
 ## 10. 비범위
 
 - public diagnostics/report surface
 - protobuf/API 변경
-- CRAM/CRAI generalization
 - FileBlock cell key normalization

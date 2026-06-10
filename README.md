@@ -24,7 +24,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 
 ## Commands
 - `make test-core` runs the core baseline tests and the external `api-protos` removal guardrail.
-- `make test-shared-fs-fixtures` runs the opt-in shared filesystem fixture smoke test using `TORI_SHARED_FIXTURE_ROOT` (default: `/mnt/genomics-test/tori-public-fixtures`; NAS today, applicable to Lustre).
+- `make test-shared-fs-fixtures` runs the opt-in shared filesystem fixture smoke test using `TORI_SHARED_FIXTURE_ROOT` (default: `/mnt/genomics-test/tori-public-fixtures`; NAS is active, Lustre is deferred until the fixture mount is ready).
 - `make test-nas-fixtures` is a compatibility alias for the shared filesystem fixture smoke test.
 - `make lint`: fail gate for core + cmd scope
 - `make lint-security`: report-only security observation (`sqlclosecheck`, `gosec`) for core scope

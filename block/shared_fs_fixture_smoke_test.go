@@ -242,6 +242,79 @@ func TestSharedFSFixtureSmoke_AlignmentBAMIndexFixtureSpecificCurrentRuleProbe(t
 	assertGeneratedFileBlockOutputs(t, workDir)
 }
 
+func TestSharedFSFixtureSmoke_AlignmentCRAMIndexFixtureSpecificCurrentRuleProbe(t *testing.T) {
+	root := os.Getenv("TORI_SHARED_FIXTURE_ROOT")
+	if root == "" {
+		root = os.Getenv("TORI_NAS_FIXTURE_ROOT")
+	}
+	if root == "" {
+		t.Skip("TORI_SHARED_FIXTURE_ROOT is not set")
+	}
+
+	alignmentDir := filepath.Join(root, "alignment_cram")
+	ruleSet := rules.RuleSet{
+		Version:     "1",
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"cram", "cram_crai"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{3, 4}},
+		SizeRules:   rules.SizeRules{MinSize: 0, MaxSize: 104857600},
+		RoleNormalization: map[string]string{
+			"cram":      "CRAM",
+			"cram_crai": "CRAI",
+		},
+	}
+	workDir, fileNames := prepareSharedFSFixtureWorkDirWithRule(t, alignmentDir, ruleSet)
+
+	preview, err := rules.GenerateResolverPreviewFromDir(workDir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir alignment CRAM/CRAI probe error: %v", err)
+	}
+	if preview.RowCount != 1 || len(preview.Rows) != 1 {
+		t.Fatalf("expected 1 CRAM alignment preview row, got %#v", preview)
+	}
+	if preview.SourceFileCount != 2 || preview.ObservedRoleCount != 2 || preview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected CRAM alignment preview summary: %#v", preview)
+	}
+	if preview.Rows[0].RoleNormalization[0].NormalizedRole != "CRAM" || preview.Rows[0].RoleNormalization[1].NormalizedRole != "CRAI" {
+		t.Fatalf("unexpected CRAM alignment normalization preview: %#v", preview.Rows[0].RoleNormalization)
+	}
+	schemaPreview := rules.BuildSchemaValidationPreview(preview, ruleSet)
+	if schemaPreview.MissingRequiredRoleCount != 0 || schemaPreview.ExtraObservedRoleCount != 0 || schemaPreview.UnresolvedObservedRoleCount != 0 {
+		t.Fatalf("expected CRAM fixture-specific schema preview to have no candidates, got %#v", schemaPreview)
+	}
+	pairingPreview := rules.BuildPrimaryIndexPairingPreview(preview, "CRAM", "CRAI")
+	if pairingPreview.EntryCount != 0 {
+		t.Fatalf("expected complete CRAM fixture primary/index pairing preview to have no candidates, got %#v", pairingPreview)
+	}
+	assertNoGeneratedPreviewOutputs(t, workDir)
+
+	fb, err := GenerateFileBlock(workDir, fileNames)
+	if err != nil {
+		t.Fatalf("GenerateFileBlock alignment CRAM/CRAI probe error: %v", err)
+	}
+	if len(fb.GetColumnHeaders()) != 2 || fb.GetColumnHeaders()[0] != "cram" || fb.GetColumnHeaders()[1] != "cram_crai" {
+		t.Fatalf("unexpected CRAM alignment probe headers: %#v", fb.GetColumnHeaders())
+	}
+	if len(fb.GetRows()) != 1 {
+		t.Fatalf("expected 1 alignment CRAM/CRAI row, got %d", len(fb.GetRows()))
+	}
+	row := fb.GetRows()[0]
+	if row.GetCells()["cram"] != "NA12878_chr21_1x.cram" {
+		t.Fatalf("unexpected CRAM cell: %#v", row.GetCells())
+	}
+	if row.GetCells()["cram_crai"] != "NA12878_chr21_1x.cram.crai" {
+		t.Fatalf("unexpected CRAI cell: %#v", row.GetCells())
+	}
+	if _, ok := row.GetCells()["CRAM"]; ok {
+		t.Fatalf("expected CRAM fixture probe cells to keep observed keys, got normalized CRAM key in %#v", row.GetCells())
+	}
+	if _, ok := row.GetCells()["CRAI"]; ok {
+		t.Fatalf("expected CRAM fixture probe cells to keep observed keys, got normalized CRAI key in %#v", row.GetCells())
+	}
+	assertGeneratedFileBlockOutputs(t, workDir)
+}
+
 func prepareSharedFSFixtureWorkDir(t *testing.T, sourceDir string) (string, []string) {
 	t.Helper()
 

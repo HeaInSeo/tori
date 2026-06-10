@@ -96,7 +96,7 @@ Current sequencing/analysis stage coverage: 11 stages.
 | Multi-organism typed-view design | Fixture ready, code/spec pending | Organism directories provide human/mouse/plant/animal/prokaryote/virus coverage. |
 | Multi-platform typed-view design | Fixture ready, code/spec pending | Illumina, 10x, PacBio/HiFi, alignment, and variant formats are represented. |
 | Analysis-stage package design | Fixture ready, code/spec pending | Raw reads, references, annotation, alignment, variant, indexes, metadata, and archive/container-like companion files are represented. |
-| Primary/index pairing | Fixture ready, BAM/BAI smoke connected | BAM/BAI complete and BAI-only unpaired index fixtures are available; CRAM/CRAI, VCF/CSI, BCF/CSI, FASTA/FAI remain available for later design. |
+| Primary/index pairing | Fixture ready, BAM/BAI and CRAM/CRAI smoke connected | BAM/BAI complete, BAI-only unpaired index, and CRAM/CRAI complete fixtures are covered; VCF/CSI, BCF/CSI, FASTA/FAI remain available for later design. |
 | Output regression from real NAS input | Ready now | Existing `fileblock.csv` and `.pb` outputs were generated from NAS valid pair-end input. |
 
 ## 4. Directory Size Distribution
