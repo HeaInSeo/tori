@@ -136,8 +136,8 @@ Sprint 14에서 complete BAM/BAI shared filesystem fixture에 pairing preview를
 현재 shared filesystem smoke semantics:
 
 - complete `BAM` + `BAI` fixture는 pairing entry가 없어야 한다.
-- unpaired index negative case는 아직 shared fixture에 없다.
-- `unpaired_index_role` negative coverage는 synthetic test로 유지한다.
+- `alignment_bam_unpaired_index/` fixture는 `unpaired_index_role` entry를 보고해야 한다.
+- `unpaired_index_role` negative coverage는 shared fixture anchored smoke로 유지한다.
 
 다음 후보는 아직 구현하지 않는다.
 
@@ -161,10 +161,16 @@ Sprint 16 follow-up:
 - typed-role pairing preview는 `unpaired_index_role`을 보고한다.
 - 따라서 unpaired index negative anchor는 synthetic-only에서 shared filename anchored temp smoke로 올라갔다.
 
+Sprint 17 follow-up:
+
+- shared fixture pack에 `alignment_bam_unpaired_index/NA12878_chr21_1x.bam.bai`를 추가했다.
+- fixture manifest와 checksum을 2026-06-10 기준으로 갱신했다.
+- shared filesystem smoke는 temp-only filename anchor가 아니라 실제 `alignment_bam_unpaired_index/` fixture directory를 읽는다.
+- `unpaired_index_role` negative coverage는 shared fixture anchored smoke로 승격되었다.
+
 ## 10. 비범위
 
 - public diagnostics/report surface
 - protobuf/API 변경
-- shared filesystem fixture pack 변경
 - CRAM/CRAI generalization
 - FileBlock cell key normalization

@@ -190,11 +190,8 @@ func TestSharedFSFixtureSmoke_AlignmentBAMIndexFixtureSpecificCurrentRuleProbe(t
 	}
 	assertNoGeneratedPreviewOutputs(t, workDir)
 
-	unpairedBAIFileName := "NA12878_chr21_1x.bam.bai"
-	if _, err := os.Stat(filepath.Join(alignmentDir, unpairedBAIFileName)); err != nil {
-		t.Fatalf("expected shared fixture unpaired BAI index source candidate at %s: %v", filepath.Join(alignmentDir, unpairedBAIFileName), err)
-	}
-	unpairedIndexWorkDir := prepareSharedFSFixtureWorkDirWithRuleAndFiles(t, ruleSet, []string{unpairedBAIFileName})
+	unpairedAlignmentDir := filepath.Join(root, "alignment_bam_unpaired_index")
+	unpairedIndexWorkDir, _ := prepareSharedFSFixtureWorkDirWithRule(t, unpairedAlignmentDir, ruleSet)
 	unpairedIndexPreview, err := rules.GenerateResolverPreviewFromDir(unpairedIndexWorkDir)
 	if err != nil {
 		t.Fatalf("GenerateResolverPreviewFromDir unpaired BAI index probe error: %v", err)
@@ -289,23 +286,6 @@ func prepareSharedFSFixtureWorkDirWithRule(t *testing.T, sourceDir string, ruleS
 	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
 
 	return workDir, fileNames
-}
-
-func prepareSharedFSFixtureWorkDirWithRuleAndFiles(t *testing.T, ruleSet rules.RuleSet, fileNames []string) string {
-	t.Helper()
-
-	ruleData, err := json.MarshalIndent(ruleSet, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal probe rule.json: %v", err)
-	}
-
-	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
-		t.Fatalf("write temp probe rule.json: %v", err)
-	}
-	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
-
-	return workDir
 }
 
 func writeFixtureFileNamePlaceholders(t *testing.T, workDir string, fileNames []string) {

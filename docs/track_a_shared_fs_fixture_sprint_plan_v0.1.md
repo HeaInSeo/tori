@@ -720,17 +720,17 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 - 다음 구현 후보는 `BuildPrimaryIndexPairingPreview`다.
 - typed-role pairing preview helper는 `rules.BuildPrimaryIndexPairingPreview`로 구현했다.
 - complete BAM/BAI shared fixture에 pairing preview positive smoke를 연결했다.
-- unpaired index alignment shared fixture 추가는 synthetic anchor 유지로 보류했다.
+- unpaired index alignment shared fixture 추가는 Sprint 17 follow-up에서 완료했다.
 - BAM/BAI alignment index validation preview 후보 결정은 `docs/track_a_alignment_index_validation_preview_candidate_v0.1.md`에 문서화했다.
 - 내일 마감 기준 다음 구현은 하지 않고 최종 검증과 보고를 우선한다.
 - CRAM/CRAI probe와 validator 구현은 마감 이후로 미룬다.
 - 마감 후 첫 follow-up으로 existing BAI filename을 이용한 temp workdir unpaired index smoke를 추가했다.
-- 이 follow-up은 shared fixture pack manifest/checksum을 변경하지 않는다.
+- 이후 Sprint 17 follow-up에서 `alignment_bam_unpaired_index/` real fixture를 추가하고 manifest/checksum을 갱신했다.
+- shared filesystem smoke는 이제 real unpaired index fixture directory를 읽는다.
 
 다음 작은 결정:
 
-- 2026-06-06 마감 후 `alignment_bam_unpaired_index` fixture 추가 여부를 재검토한다.
-- fixture를 추가한다면 manifest/checksum 갱신과 real unpaired index fixture smoke 연결을 같은 작은 sprint로 묶는다.
+- 다음 후보는 CRAM/CRAI primary/index pairing probe 여부를 결정하는 것이다.
 - normalization map은 v0.1에서 rule spec 쪽에 둔다는 기존 결정은 유지한다.
 - current `RoleKey`는 observed key 의미를 유지한다는 기존 결정은 유지한다.
 

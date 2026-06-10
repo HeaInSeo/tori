@@ -42,8 +42,8 @@
 - `paired_fastq_duplicate_role/`
 - `alignment_bam/`
 
-`alignment_bam/`은 complete BAM/BAI positive case로만 사용한다.
-unpaired BAM index negative case는 아직 shared fixture pack에 없다.
+`alignment_bam/`은 complete BAM/BAI positive case로 사용한다.
+2026-06-10 follow-up 기준 unpaired BAM index negative case는 `alignment_bam_unpaired_index/`로 shared fixture pack에 추가되었다.
 
 ## 4. 보류 범위
 
@@ -85,3 +85,9 @@ make test-shared-fs-fixtures
 - 추가 시 manifest/checksum 갱신
 - unpaired index shared smoke 연결
 - 그 뒤 CRAM/CRAI 확장 여부 판단
+
+2026-06-10 follow-up:
+
+- `alignment_bam_unpaired_index` fixture를 추가했다.
+- NAS fixture manifest/checksum을 갱신했다.
+- unpaired index shared smoke는 실제 fixture directory 기반으로 승격되었다.

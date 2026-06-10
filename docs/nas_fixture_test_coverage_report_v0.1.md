@@ -3,7 +3,7 @@
 Date: 2026-06-02
 Fixture root: `/mnt/genomics-test/tori-public-fixtures`
 Total size: about 20M
-Total files: 60
+Total files: 61
 Checksum file: `/mnt/genomics-test/tori-public-fixtures/metadata/SHA256SUMS.txt`
 
 ## Scope
@@ -22,7 +22,7 @@ Genomics fixture files must remain on NAS. Do not copy them into the local check
 | `.fasta.fai` | 1 | `reference_annotation/sarscov2_genome.fasta.fai` | FASTA primary/index pairing. |
 | `.gff3` | 1 | `reference_annotation/sarscov2_genome.gff3` | Annotation typed view. |
 | `.gtf` | 1 | `reference_annotation/sarscov2_genome.gtf` | Annotation typed view. |
-| `.bam` + `.bam.bai` | 1 + 1 | `alignment_bam/NA12878_chr21_1x.bam*` | Alignment file and index file pairing. |
+| `.bam` + `.bam.bai` | 1 + 2 | `alignment_bam/NA12878_chr21_1x.bam*`, `alignment_bam_unpaired_index/NA12878_chr21_1x.bam.bai` | Alignment file/index pairing plus unpaired index negative fixture. |
 | `.cram` + `.cram.crai` | 1 + 1 | `alignment_cram/NA12878_chr21_1x.cram*` | CRAM file and index file pairing. |
 | `.vcf.gz` + `.vcf.gz.csi` | 2 + 2 | `variant_vcf/*` | Variant file and CSI primary/index pairing. |
 | `.bcf` + `.bcf.csi` | 2 + 2 | `variant_bcf/*` | Binary variant file and CSI primary/index pairing. |
@@ -61,9 +61,9 @@ Current organism axis coverage: 6 groups.
 |---|---|---|---|
 | Illumina paired-end short reads | Present | `paired_fastq_valid/`, `paired_fastq_missing_role/`, `paired_fastq_duplicate_role/`, `paired_fastq_invalid/`, `organisms/prokaryote_ecoli/Ecoli_10K_methylated_R*.fastq.gz` | Current pair-end FileBlock grouping, missing role, duplicate role collision. |
 | Illumina-style single FASTQ screen reads | Present | `organisms/mouse_mus_musculus/ERR376998.small.fastq.gz`, `ERR376999.small.fastq.gz` | Non-pair-end FASTQ package designs. |
-| 10x Genomics multiome | Present | `organisms/mouse_mus_musculus/SRR18907480_chr19_sub_S1_L001_R*.fastq.gz`, `10x_multiome_lib.csv` | Multi-modal naming and metadata metadata companion-file tests. |
+| 10x Genomics multiome | Present | `organisms/mouse_mus_musculus/SRR18907480_chr19_sub_S1_L001_R*.fastq.gz`, `10x_multiome_lib.csv` | Multi-modal naming and companion metadata tests. |
 | PacBio / HiFi long reads | Present | `organisms/plant_arabidopsis/ddAraThal4.HiFi.reads.fasta`, `organisms/animal_chicken/pacbio_metagenome.fastq.gz` | Long-read FASTA/FASTQ typed-view tests. |
-| Alignment result formats | Present | `alignment_bam/`, `alignment_cram/` | Post-alignment package and index pairing tests. |
+| Alignment result formats | Present | `alignment_bam/`, `alignment_bam_unpaired_index/`, `alignment_cram/` | Post-alignment package, index pairing, and unpaired index tests. |
 | Variant result formats | Present | `variant_vcf/`, `variant_bcf/` | Variant package and index pairing tests. |
 
 Current platform/source-style axis coverage: 6 classes.
@@ -81,7 +81,7 @@ Current platform/source-style axis coverage: 6 classes.
 | Alignment index | Present | `*.bai`, `*.crai` | Alignment primary/index pairing. |
 | Variant output | Present | `variant_vcf/*.vcf.gz`, `variant_bcf/*.bcf` | Variant package tests. |
 | Variant index | Present | `*.csi` | Variant primary/index pairing. |
-| Library/sample metadata | Present | `organisms/mouse_mus_musculus/10x_multiome_lib.csv` | Metadata metadata companion-file tests. |
+| Library/sample metadata | Present | `organisms/mouse_mus_musculus/10x_multiome_lib.csv` | Companion metadata tests. |
 | tori generated result | Present | `paired_fastq_valid/fileblock.csv`, `paired_fastq_valid/paired_fastq_validfiles.pb` | Regression check for actual tori output generated from NAS input. |
 
 Current sequencing/analysis stage coverage: 11 stages.
@@ -96,7 +96,7 @@ Current sequencing/analysis stage coverage: 11 stages.
 | Multi-organism typed-view design | Fixture ready, code/spec pending | Organism directories provide human/mouse/plant/animal/prokaryote/virus coverage. |
 | Multi-platform typed-view design | Fixture ready, code/spec pending | Illumina, 10x, PacBio/HiFi, alignment, and variant formats are represented. |
 | Analysis-stage package design | Fixture ready, code/spec pending | Raw reads, references, annotation, alignment, variant, indexes, metadata, and archive/container-like companion files are represented. |
-| Primary/index pairing | Fixture ready, rule design pending | BAM/BAI, CRAM/CRAI, VCF/CSI, BCF/CSI, FASTA/FAI are available. |
+| Primary/index pairing | Fixture ready, BAM/BAI smoke connected | BAM/BAI complete and BAI-only unpaired index fixtures are available; CRAM/CRAI, VCF/CSI, BCF/CSI, FASTA/FAI remain available for later design. |
 | Output regression from real NAS input | Ready now | Existing `fileblock.csv` and `.pb` outputs were generated from NAS valid pair-end input. |
 
 ## 4. Directory Size Distribution
@@ -107,6 +107,7 @@ Current sequencing/analysis stage coverage: 11 stages.
 | `variant_bcf/` | 2.0M | Binary variant fixtures and CSI index files. |
 | `variant_vcf/` | 782K | Compressed VCF fixtures and CSI index files. |
 | `alignment_bam/` | 275K | BAM + BAI fixture. |
+| `alignment_bam_unpaired_index/` | 36K | BAI-only unpaired index negative fixture. |
 | `alignment_cram/` | 130K | CRAM + CRAI fixture. |
 | `paired_fastq_valid/` | 74K | Current resolver happy-path fixture plus generated tori outputs. |
 | `paired_fastq_invalid/` | 67K | Legacy mixed invalid fixture containing both missing-role and duplicate-role cases. |

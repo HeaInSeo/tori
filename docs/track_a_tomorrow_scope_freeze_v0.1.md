@@ -63,3 +63,9 @@ make test-shared-fs-fixtures
 - manifest/checksum 갱신 절차 실행
 - pairing preview를 unpaired index shared fixture smoke에 연결
 - 그 다음 CRAM/CRAI로 확장 여부 판단
+
+2026-06-10 follow-up:
+
+- `alignment_bam_unpaired_index` fixture를 추가했다.
+- manifest/checksum을 갱신했다.
+- pairing preview를 실제 unpaired index shared fixture smoke에 연결했다.
