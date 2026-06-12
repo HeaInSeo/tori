@@ -53,6 +53,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 - [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
+- [`docs/track_a_nas_completion_remaining_work_2026_06_12.md`](docs/track_a_nas_completion_remaining_work_2026_06_12.md)
 
 ## Deferred Area (Explicit)
 - Final proto contract ownership is narrowed but not fully closed for all services yet.

@@ -52,6 +52,7 @@
 - [`docs/architecture/proto_canonicalization_phase2_migration_order_note.md`](docs/architecture/proto_canonicalization_phase2_migration_order_note.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 - [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
+- [`docs/track_a_nas_completion_remaining_work_2026_06_12.md`](docs/track_a_nas_completion_remaining_work_2026_06_12.md)
 
 ## 보류 영역(명시)
 - 최종 proto contract ownership은 서비스 전체 기준으로는 아직 완전히 닫히지 않았다.
