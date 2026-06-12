@@ -97,3 +97,9 @@ make test-shared-fs-fixtures
 - NAS 기준 `alignment_cram/` complete fixture smoke를 추가했다.
 - complete CRAM/CRAI는 primary/index pairing entry를 내지 않는 것으로 고정했다.
 - Lustre 검증은 fixture mount 준비 전까지 후순위 보류다.
+
+2026-06-12 variant/reference follow-up:
+
+- NAS 기준 VCF/CSI, BCF/CSI, FASTA/FAI complete fixture smoke를 추가했다.
+- complete VCF/CSI, BCF/CSI, FASTA/FAI는 primary/index pairing entry를 내지 않는 것으로 고정했다.
+- Lustre 검증은 fixture mount 준비 전까지 후순위 보류다.

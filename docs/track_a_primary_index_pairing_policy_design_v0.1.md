@@ -175,6 +175,14 @@ Sprint 18 follow-up:
 - complete `CRAM` + `CRAI` fixture는 primary/index pairing entry를 내지 않는다.
 - Lustre 검증은 fixture mount 준비 전까지 보류한다.
 
+Sprint 19 follow-up:
+
+- NAS 기준 `variant_vcf/` complete VCF/CSI fixture smoke를 추가했다.
+- NAS 기준 `variant_bcf/NA12878_chr21.bcf*` representative BCF/CSI fixture smoke를 추가했다.
+- NAS 기준 `reference_annotation/sarscov2_genome.fasta*` representative FASTA/FAI fixture smoke를 추가했다.
+- complete VCF/CSI, BCF/CSI, FASTA/FAI fixture는 primary/index pairing entry를 내지 않는다.
+- BCF와 FASTA는 fixture directory 안에 다른 shape의 파일도 있으므로 selected-file temp workdir probe로 유지한다.
+
 ## 10. 비범위
 
 - public diagnostics/report surface

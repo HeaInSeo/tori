@@ -730,7 +730,8 @@ repo 안의 반복 가능한 shared filesystem smoke gate는 Sprint 0에서 닫�
 
 다음 작은 결정:
 
-- 다음 후보는 VCF/CSI, BCF/CSI, FASTA/FAI 중 어느 primary/index pairing probe를 먼저 볼지 결정하는 것이다.
+- VCF/CSI, BCF/CSI, FASTA/FAI primary/index pairing probe는 Sprint 19 follow-up에서 NAS smoke로 연결했다.
+- 다음 후보는 NAS 기준 primary/index probe 결과를 정리하고, Lustre fixture mount가 준비되면 같은 smoke contract를 재검증하는 것이다.
 - normalization map은 v0.1에서 rule spec 쪽에 둔다는 기존 결정은 유지한다.
 - current `RoleKey`는 observed key 의미를 유지한다는 기존 결정은 유지한다.
 

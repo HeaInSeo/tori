@@ -315,6 +315,216 @@ func TestSharedFSFixtureSmoke_AlignmentCRAMIndexFixtureSpecificCurrentRuleProbe(
 	assertGeneratedFileBlockOutputs(t, workDir)
 }
 
+func TestSharedFSFixtureSmoke_VariantVCFIndexFixtureSpecificCurrentRuleProbe(t *testing.T) {
+	root := os.Getenv("TORI_SHARED_FIXTURE_ROOT")
+	if root == "" {
+		root = os.Getenv("TORI_NAS_FIXTURE_ROOT")
+	}
+	if root == "" {
+		t.Skip("TORI_SHARED_FIXTURE_ROOT is not set")
+	}
+
+	variantDir := filepath.Join(root, "variant_vcf")
+	ruleSet := rules.RuleSet{
+		Version:     "1",
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"vcf_gz", "vcf_gz_csi"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1, 2}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{3, 4, 5}},
+		SizeRules:   rules.SizeRules{MinSize: 0, MaxSize: 104857600},
+		RoleNormalization: map[string]string{
+			"vcf_gz":     "VCF",
+			"vcf_gz_csi": "CSI",
+		},
+	}
+	workDir, fileNames := prepareSharedFSFixtureWorkDirWithRule(t, variantDir, ruleSet)
+
+	preview, err := rules.GenerateResolverPreviewFromDir(workDir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir variant VCF/CSI probe error: %v", err)
+	}
+	if preview.RowCount != 2 || len(preview.Rows) != 2 {
+		t.Fatalf("expected 2 VCF preview rows, got %#v", preview)
+	}
+	if preview.SourceFileCount != 4 || preview.ObservedRoleCount != 4 || preview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected VCF preview summary: %#v", preview)
+	}
+	for _, row := range preview.Rows {
+		if row.RoleNormalization[0].NormalizedRole != "VCF" || row.RoleNormalization[1].NormalizedRole != "CSI" {
+			t.Fatalf("unexpected VCF normalization preview: %#v", row.RoleNormalization)
+		}
+	}
+	schemaPreview := rules.BuildSchemaValidationPreview(preview, ruleSet)
+	if schemaPreview.MissingRequiredRoleCount != 0 || schemaPreview.ExtraObservedRoleCount != 0 || schemaPreview.UnresolvedObservedRoleCount != 0 {
+		t.Fatalf("expected VCF fixture-specific schema preview to have no candidates, got %#v", schemaPreview)
+	}
+	pairingPreview := rules.BuildPrimaryIndexPairingPreview(preview, "VCF", "CSI")
+	if pairingPreview.EntryCount != 0 {
+		t.Fatalf("expected complete VCF fixture primary/index pairing preview to have no candidates, got %#v", pairingPreview)
+	}
+	assertNoGeneratedPreviewOutputs(t, workDir)
+
+	fb, err := GenerateFileBlock(workDir, fileNames)
+	if err != nil {
+		t.Fatalf("GenerateFileBlock variant VCF/CSI probe error: %v", err)
+	}
+	if len(fb.GetColumnHeaders()) != 2 || fb.GetColumnHeaders()[0] != "vcf_gz" || fb.GetColumnHeaders()[1] != "vcf_gz_csi" {
+		t.Fatalf("unexpected VCF probe headers: %#v", fb.GetColumnHeaders())
+	}
+	if len(fb.GetRows()) != 2 {
+		t.Fatalf("expected 2 variant VCF/CSI rows, got %d", len(fb.GetRows()))
+	}
+	for _, row := range fb.GetRows() {
+		if _, ok := row.GetCells()["VCF"]; ok {
+			t.Fatalf("expected VCF fixture probe cells to keep observed keys, got normalized VCF key in %#v", row.GetCells())
+		}
+		if _, ok := row.GetCells()["CSI"]; ok {
+			t.Fatalf("expected VCF fixture probe cells to keep observed keys, got normalized CSI key in %#v", row.GetCells())
+		}
+	}
+	assertGeneratedFileBlockOutputs(t, workDir)
+}
+
+func TestSharedFSFixtureSmoke_VariantBCFIndexFixtureSpecificCurrentRuleProbe(t *testing.T) {
+	root := os.Getenv("TORI_SHARED_FIXTURE_ROOT")
+	if root == "" {
+		root = os.Getenv("TORI_NAS_FIXTURE_ROOT")
+	}
+	if root == "" {
+		t.Skip("TORI_SHARED_FIXTURE_ROOT is not set")
+	}
+
+	variantDir := filepath.Join(root, "variant_bcf")
+	ruleSet := rules.RuleSet{
+		Version:     "1",
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"bcf", "bcf_csi"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{2, 3}},
+		SizeRules:   rules.SizeRules{MinSize: 0, MaxSize: 104857600},
+		RoleNormalization: map[string]string{
+			"bcf":     "BCF",
+			"bcf_csi": "CSI",
+		},
+	}
+	workDir, fileNames := prepareSharedFSFixtureWorkDirWithRuleAndSelectedFiles(t, variantDir, ruleSet, []string{
+		"NA12878_chr21.bcf",
+		"NA12878_chr21.bcf.csi",
+	})
+
+	preview, err := rules.GenerateResolverPreviewFromDir(workDir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir variant BCF/CSI probe error: %v", err)
+	}
+	if preview.RowCount != 1 || len(preview.Rows) != 1 {
+		t.Fatalf("expected 1 BCF preview row, got %#v", preview)
+	}
+	if preview.SourceFileCount != 2 || preview.ObservedRoleCount != 2 || preview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected BCF preview summary: %#v", preview)
+	}
+	if preview.Rows[0].RoleNormalization[0].NormalizedRole != "BCF" || preview.Rows[0].RoleNormalization[1].NormalizedRole != "CSI" {
+		t.Fatalf("unexpected BCF normalization preview: %#v", preview.Rows[0].RoleNormalization)
+	}
+	schemaPreview := rules.BuildSchemaValidationPreview(preview, ruleSet)
+	if schemaPreview.MissingRequiredRoleCount != 0 || schemaPreview.ExtraObservedRoleCount != 0 || schemaPreview.UnresolvedObservedRoleCount != 0 {
+		t.Fatalf("expected BCF fixture-specific schema preview to have no candidates, got %#v", schemaPreview)
+	}
+	pairingPreview := rules.BuildPrimaryIndexPairingPreview(preview, "BCF", "CSI")
+	if pairingPreview.EntryCount != 0 {
+		t.Fatalf("expected complete BCF fixture primary/index pairing preview to have no candidates, got %#v", pairingPreview)
+	}
+	assertNoGeneratedPreviewOutputs(t, workDir)
+
+	fb, err := GenerateFileBlock(workDir, fileNames)
+	if err != nil {
+		t.Fatalf("GenerateFileBlock variant BCF/CSI probe error: %v", err)
+	}
+	if len(fb.GetColumnHeaders()) != 2 || fb.GetColumnHeaders()[0] != "bcf" || fb.GetColumnHeaders()[1] != "bcf_csi" {
+		t.Fatalf("unexpected BCF probe headers: %#v", fb.GetColumnHeaders())
+	}
+	if len(fb.GetRows()) != 1 {
+		t.Fatalf("expected 1 variant BCF/CSI row, got %d", len(fb.GetRows()))
+	}
+	row := fb.GetRows()[0]
+	if row.GetCells()["bcf"] != "NA12878_chr21.bcf" {
+		t.Fatalf("unexpected BCF cell: %#v", row.GetCells())
+	}
+	if row.GetCells()["bcf_csi"] != "NA12878_chr21.bcf.csi" {
+		t.Fatalf("unexpected BCF CSI cell: %#v", row.GetCells())
+	}
+	assertGeneratedFileBlockOutputs(t, workDir)
+}
+
+func TestSharedFSFixtureSmoke_ReferenceFASTAIndexFixtureSpecificCurrentRuleProbe(t *testing.T) {
+	root := os.Getenv("TORI_SHARED_FIXTURE_ROOT")
+	if root == "" {
+		root = os.Getenv("TORI_NAS_FIXTURE_ROOT")
+	}
+	if root == "" {
+		t.Skip("TORI_SHARED_FIXTURE_ROOT is not set")
+	}
+
+	referenceDir := filepath.Join(root, "reference_annotation")
+	ruleSet := rules.RuleSet{
+		Version:     "1",
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"fasta", "fasta_fai"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{2, 3}},
+		SizeRules:   rules.SizeRules{MinSize: 0, MaxSize: 104857600},
+		RoleNormalization: map[string]string{
+			"fasta":     "FASTA",
+			"fasta_fai": "FAI",
+		},
+	}
+	workDir, fileNames := prepareSharedFSFixtureWorkDirWithRuleAndSelectedFiles(t, referenceDir, ruleSet, []string{
+		"sarscov2_genome.fasta",
+		"sarscov2_genome.fasta.fai",
+	})
+
+	preview, err := rules.GenerateResolverPreviewFromDir(workDir)
+	if err != nil {
+		t.Fatalf("GenerateResolverPreviewFromDir reference FASTA/FAI probe error: %v", err)
+	}
+	if preview.RowCount != 1 || len(preview.Rows) != 1 {
+		t.Fatalf("expected 1 FASTA preview row, got %#v", preview)
+	}
+	if preview.SourceFileCount != 2 || preview.ObservedRoleCount != 2 || preview.UnresolvedRoleCount != 0 {
+		t.Fatalf("unexpected FASTA preview summary: %#v", preview)
+	}
+	if preview.Rows[0].RoleNormalization[0].NormalizedRole != "FASTA" || preview.Rows[0].RoleNormalization[1].NormalizedRole != "FAI" {
+		t.Fatalf("unexpected FASTA normalization preview: %#v", preview.Rows[0].RoleNormalization)
+	}
+	schemaPreview := rules.BuildSchemaValidationPreview(preview, ruleSet)
+	if schemaPreview.MissingRequiredRoleCount != 0 || schemaPreview.ExtraObservedRoleCount != 0 || schemaPreview.UnresolvedObservedRoleCount != 0 {
+		t.Fatalf("expected FASTA fixture-specific schema preview to have no candidates, got %#v", schemaPreview)
+	}
+	pairingPreview := rules.BuildPrimaryIndexPairingPreview(preview, "FASTA", "FAI")
+	if pairingPreview.EntryCount != 0 {
+		t.Fatalf("expected complete FASTA fixture primary/index pairing preview to have no candidates, got %#v", pairingPreview)
+	}
+	assertNoGeneratedPreviewOutputs(t, workDir)
+
+	fb, err := GenerateFileBlock(workDir, fileNames)
+	if err != nil {
+		t.Fatalf("GenerateFileBlock reference FASTA/FAI probe error: %v", err)
+	}
+	if len(fb.GetColumnHeaders()) != 2 || fb.GetColumnHeaders()[0] != "fasta" || fb.GetColumnHeaders()[1] != "fasta_fai" {
+		t.Fatalf("unexpected FASTA probe headers: %#v", fb.GetColumnHeaders())
+	}
+	if len(fb.GetRows()) != 1 {
+		t.Fatalf("expected 1 reference FASTA/FAI row, got %d", len(fb.GetRows()))
+	}
+	row := fb.GetRows()[0]
+	if row.GetCells()["fasta"] != "sarscov2_genome.fasta" {
+		t.Fatalf("unexpected FASTA cell: %#v", row.GetCells())
+	}
+	if row.GetCells()["fasta_fai"] != "sarscov2_genome.fasta.fai" {
+		t.Fatalf("unexpected FAI cell: %#v", row.GetCells())
+	}
+	assertGeneratedFileBlockOutputs(t, workDir)
+}
+
 func prepareSharedFSFixtureWorkDir(t *testing.T, sourceDir string) (string, []string) {
 	t.Helper()
 
@@ -345,6 +555,29 @@ func prepareSharedFSFixtureWorkDirWithRule(t *testing.T, sourceDir string, ruleS
 	fileNames, err := rules.ListFilesExclude(sourceDir, exclusions)
 	if err != nil {
 		t.Fatalf("list shared filesystem fixture files from %s: %v", sourceDir, err)
+	}
+
+	ruleData, err := json.MarshalIndent(ruleSet, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal probe rule.json: %v", err)
+	}
+
+	workDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
+		t.Fatalf("write temp probe rule.json: %v", err)
+	}
+	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
+
+	return workDir, fileNames
+}
+
+func prepareSharedFSFixtureWorkDirWithRuleAndSelectedFiles(t *testing.T, sourceDir string, ruleSet rules.RuleSet, fileNames []string) (string, []string) {
+	t.Helper()
+
+	for _, fileName := range fileNames {
+		if _, err := os.Stat(filepath.Join(sourceDir, fileName)); err != nil {
+			t.Fatalf("stat selected shared filesystem fixture file %s: %v", filepath.Join(sourceDir, fileName), err)
+		}
 	}
 
 	ruleData, err := json.MarshalIndent(ruleSet, "", "  ")
