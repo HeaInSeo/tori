@@ -35,10 +35,10 @@ doctor:
 	@go version
 
 test:
-	go test -race ./...
+	go test -race -shuffle=on -count=1 ./...
 
 test-core: test-guardrail
-	go test -race $(PKGS_TEST_CORE)
+	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE)
 
 test-shared-fs-fixtures:
 	TORI_SHARED_FIXTURE_ROOT="$(TORI_SHARED_FIXTURE_ROOT)" go test -race ./block -run TestSharedFSFixtureSmoke
