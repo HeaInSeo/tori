@@ -3,8 +3,8 @@ package grpc
 import (
 	"context"
 
-	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
-	appservice "github.com/seoyhaein/tori/service"
+	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
+	appservice "github.com/HeaInSeo/tori/service"
 )
 
 // DataBlockServer is the gRPC transport adapter for the app service contract.

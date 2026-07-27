@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/seoyhaein/tori/rules"
+	"github.com/HeaInSeo/tori/rules"
 )
 
 func TestSharedFSFixtureSmoke_PairedFASTQ(t *testing.T) {

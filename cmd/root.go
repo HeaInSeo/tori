@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
-	c "github.com/seoyhaein/tori/config"
-	dbUtils "github.com/seoyhaein/tori/db"
-	globallog "github.com/seoyhaein/tori/log"
-	"github.com/seoyhaein/tori/service"
+	c "github.com/HeaInSeo/tori/config"
+	dbUtils "github.com/HeaInSeo/tori/db"
+	globallog "github.com/HeaInSeo/tori/log"
+	"github.com/HeaInSeo/tori/service"
 	"github.com/spf13/cobra"
 )
 

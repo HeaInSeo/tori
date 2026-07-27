@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
+	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
 	"google.golang.org/protobuf/proto"
 )
 

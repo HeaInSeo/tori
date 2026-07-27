@@ -323,7 +323,7 @@ var File_ichthys_v1_datablock_service_proto protoreflect.FileDescriptor
 const file_ichthys_v1_datablock_service_proto_rawDesc = "" +
 	"\n" +
 	"\"ichthys/v1/datablock_service.proto\x12\n" +
-	"ichthys.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bgoogle/protobuf/empty.proto\"r\n" +
+	"ichthys.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"r\n" +
 	"\tFileBlock\x12\x19\n" +
 	"\bblock_id\x18\x01 \x01(\tR\ablockId\x12%\n" +
 	"\x0ecolumn_headers\x18\x02 \x03(\tR\rcolumnHeaders\x12#\n" +
@@ -348,7 +348,7 @@ const file_ichthys_v1_datablock_service_proto_rawDesc = "" +
 	"\tno_update\x18\x02 \x01(\v2\x16.google.protobuf.EmptyH\x00R\bnoUpdateB\t\n" +
 	"\apayload2k\n" +
 	"\x10DataBlockService\x12W\n" +
-	"\x0eFetchDataBlock\x12!.ichthys.v1.FetchDataBlockRequest\x1a\".ichthys.v1.FetchDataBlockResponseB7Z5github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
+	"\x0eFetchDataBlock\x12!.ichthys.v1.FetchDataBlockRequest\x1a\".ichthys.v1.FetchDataBlockResponseB6Z4github.com/HeaInSeo/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
 
 var (
 	file_ichthys_v1_datablock_service_proto_rawDescOnce sync.Once

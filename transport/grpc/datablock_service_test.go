@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
+	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -28,9 +28,9 @@ linters:
             - "rules/*.go"
             - "rules/**/*.go"
           deny:
-            - pkg: "github.com/seoyhaein/tori/service"
+            - pkg: "github.com/HeaInSeo/tori/service"
               desc: "core baseline packages must not depend on the app service boundary"
-            - pkg: "github.com/seoyhaein/tori/transport/**"
+            - pkg: "github.com/HeaInSeo/tori/transport/**"
               desc: "core baseline packages must not depend on transport adapters"
             - pkg: "k8s.io/**"
               desc: "core baseline packages must stay Kubernetes-independent in Phase 0/Track A"
@@ -43,9 +43,9 @@ linters:
             - "block/*.go"
             - "block/**/*.go"
           deny:
-            - pkg: "github.com/seoyhaein/tori/service"
+            - pkg: "github.com/HeaInSeo/tori/service"
               desc: "block stays below the app service boundary in the current baseline"
-            - pkg: "github.com/seoyhaein/tori/transport/**"
+            - pkg: "github.com/HeaInSeo/tori/transport/**"
               desc: "block must not depend on transport adapters"
             - pkg: "k8s.io/**"
               desc: "block must stay Kubernetes-independent in Phase 0/Track A"
@@ -58,7 +58,7 @@ linters:
             - "cmd/*.go"
             - "cmd/**/*.go"
           deny:
-            - pkg: "github.com/seoyhaein/tori/transport/**"
+            - pkg: "github.com/HeaInSeo/tori/transport/**"
               desc: "cmd should prefer the local/in-process service path instead of transport adapters"
             - pkg: "k8s.io/**"
               desc: "cmd should not take a direct Kubernetes dependency in the current baseline"

@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"strings"
 
-	globallog "github.com/seoyhaein/tori/log"
+	globallog "github.com/HeaInSeo/tori/log"
 )
 
 var (

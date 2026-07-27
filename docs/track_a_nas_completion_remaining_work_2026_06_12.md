@@ -58,6 +58,27 @@ GitHub Actions gate:
 
 - `core-ci`
 
+### 3.1 Sprint 0 re-verification record (2026-06-21)
+
+The NAS baseline was re-verified from the current checkout with the local stale
+`GOROOT` setting removed for the command invocation.
+
+```sh
+env -u GOROOT make doctor
+env -u GOROOT make lint
+env -u GOROOT make test-core
+env -u GOROOT make test-shared-fs-fixtures
+cd /mnt/genomics-test/tori-public-fixtures
+sha256sum -c metadata/SHA256SUMS.txt
+```
+
+Results:
+
+- `make doctor`, `make lint`, `make test-core`, and the NAS shared-fixture smoke gate passed.
+- Every artifact listed in `metadata/SHA256SUMS.txt` passed checksum verification.
+- `SHA256SUMS.txt` itself is not self-verified by its own manifest; its storage/provenance remains an external fixture-management concern.
+- Lustre parity remains deferred until a Lustre fixture mount is available.
+
 ## 4. Remaining Work
 
 Immediate NAS Track A primary/index fixture work:
@@ -84,4 +105,3 @@ The following are not cleanup targets:
 - tracked `reports/` files
 - NAS fixture files under `/mnt/genomics-test/tori-public-fixtures`
 - generated fixture manifest and checksum files in the NAS fixture metadata directory
-

@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/seoyhaein/tori/block"
-	globallog "github.com/seoyhaein/tori/log"
+	"github.com/HeaInSeo/tori/block"
+	globallog "github.com/HeaInSeo/tori/log"
 )
 
 // SyncFolders 는 DB 스냅샷 비교부터 DataBlock 파일 생성까지 모두 처리 TODO SyncFolders, DiffFolders 들ㅇ가는 입력 파라미터 수정할 필요 있음.

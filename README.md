@@ -23,6 +23,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - The next architecture task is not broad transport feature expansion. The current concern is keeping contract ownership, remote surface, and Phase 2 migration order explicit without starting broad import migration too early.
 
 ## Commands
+- `make doctor` checks that `GOROOT`, when set, points to an existing Go installation before Go-based targets run.
 - `make test-core` runs the core baseline tests and the external `api-protos` removal guardrail.
 - `make test-shared-fs-fixtures` runs the opt-in shared filesystem fixture smoke test using `TORI_SHARED_FIXTURE_ROOT` (default: `/mnt/genomics-test/tori-public-fixtures`; NAS is active, Lustre is deferred until the fixture mount is ready).
 - `make test-nas-fixtures` is a compatibility alias for the shared filesystem fixture smoke test.
@@ -31,6 +32,8 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - `make vuln`: report-only vuln scan for core scope
 - `make vuln-all`: report-only vuln scan for all packages
 - `make test`: full repository status check
+
+If `make doctor` reports an invalid `GOROOT`, remove or correct that shell environment export. The repository requires Go 1.25.5; a stale downloaded-toolchain path must not be used as `GOROOT`.
 
 ## Design Documents
 - [`docs/tori_living_technical_draft_v0.2.md`](docs/tori_living_technical_draft_v0.2.md)
@@ -54,6 +57,7 @@ English: [README.md](README.md) | Korean: [README.ko.md](README.ko.md)
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 - [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
 - [`docs/track_a_nas_completion_remaining_work_2026_06_12.md`](docs/track_a_nas_completion_remaining_work_2026_06_12.md)
+- [`docs/product_readiness_sprint_plan_v0.1.md`](docs/product_readiness_sprint_plan_v0.1.md)
 
 ## Deferred Area (Explicit)
 - Final proto contract ownership is narrowed but not fully closed for all services yet.

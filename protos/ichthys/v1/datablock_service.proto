@@ -5,7 +5,7 @@ package ichthys.v1;
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1";
+option go_package = "github.com/HeaInSeo/tori/protos/ichthys/v1;ichthysv1";
 
 // FileBlock represents one grouped file slice.
 message FileBlock {

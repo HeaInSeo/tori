@@ -122,7 +122,7 @@ const file_ichthys_v1_syncfolders_service_proto_rawDesc = "" +
 	"\x13SyncFoldersResponse\x12\x18\n" +
 	"\aupdated\x18\x01 \x01(\bR\aupdated2d\n" +
 	"\x12SyncFoldersService\x12N\n" +
-	"\vSyncFolders\x12\x1e.ichthys.v1.SyncFoldersRequest\x1a\x1f.ichthys.v1.SyncFoldersResponseB7Z5github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
+	"\vSyncFolders\x12\x1e.ichthys.v1.SyncFoldersRequest\x1a\x1f.ichthys.v1.SyncFoldersResponseB6Z4github.com/HeaInSeo/tori/protos/ichthys/v1;ichthysv1b\x06proto3"
 
 var (
 	file_ichthys_v1_syncfolders_service_proto_rawDescOnce sync.Once

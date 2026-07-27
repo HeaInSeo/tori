@@ -1,4 +1,4 @@
-module github.com/seoyhaein/tori
+module github.com/HeaInSeo/tori
 
 go 1.25.12
 

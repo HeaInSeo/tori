@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package ichthys.v1;
 
-option go_package = "github.com/seoyhaein/tori/protos/ichthys/v1;ichthysv1";
+option go_package = "github.com/HeaInSeo/tori/protos/ichthys/v1;ichthysv1";
 
 // SyncFoldersRequest triggers folder synchronization.
 message SyncFoldersRequest {

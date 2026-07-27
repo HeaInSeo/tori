@@ -23,6 +23,7 @@
 - 다음 architecture 과제는 broad transport feature 확장이 아니다. 현재 초점은 `contract ownership`, `remote surface`, `Phase 2 migration order`를 기준선으로 유지하면서 너무 이른 broad import migration을 피하는 것이다.
 
 ## 명령
+- `make doctor`: `GOROOT`가 설정된 경우 실제 Go 설치 경로인지 먼저 확인
 - `make test-core`: 코어 baseline 테스트와 external `api-protos` 제거 guardrail 실행
 - `make test-shared-fs-fixtures`: `TORI_SHARED_FIXTURE_ROOT` 기준 shared filesystem fixture smoke 테스트 실행(기본값: `/mnt/genomics-test/tori-public-fixtures`; 현재는 NAS만 활성, Lustre는 fixture mount 준비 전까지 보류)
 - `make test-nas-fixtures`: shared filesystem fixture smoke 테스트의 호환 alias
@@ -31,6 +32,8 @@
 - `make vuln`: 코어 범위 취약점 관찰(report-only)
 - `make vuln-all`: 전체 범위 취약점 관찰(report-only)
 - `make test`: 저장소 전체 상태 확인
+
+`make doctor`가 잘못된 `GOROOT`를 보고하면 셸 환경의 해당 export를 제거하거나 올바른 Go 설치 경로로 수정한다. 이 저장소는 Go 1.25.5를 사용하며, 삭제된 자동 다운로드 toolchain 경로를 `GOROOT`로 사용하면 안 된다.
 
 ## 설계 문서
 - [`docs/tori_living_technical_draft_v0.2.md`](docs/tori_living_technical_draft_v0.2.md)
@@ -53,6 +56,7 @@
 - [`docs/pipeline_binding_docs_index_v0.1.md`](docs/pipeline_binding_docs_index_v0.1.md)
 - [`docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md`](docs/track_a_shared_fs_fixture_sprint_plan_v0.1.md)
 - [`docs/track_a_nas_completion_remaining_work_2026_06_12.md`](docs/track_a_nas_completion_remaining_work_2026_06_12.md)
+- [`docs/product_readiness_sprint_plan_v0.1.md`](docs/product_readiness_sprint_plan_v0.1.md)
 
 ## 보류 영역(명시)
 - 최종 proto contract ownership은 서비스 전체 기준으로는 아직 완전히 닫히지 않았다.

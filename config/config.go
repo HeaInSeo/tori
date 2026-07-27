@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	globallog "github.com/seoyhaein/tori/log"
+	globallog "github.com/HeaInSeo/tori/log"
 )
 
 type Config struct {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	globallog "github.com/seoyhaein/tori/log"
+	globallog "github.com/HeaInSeo/tori/log"
 	"github.com/seoyhaein/utils"
 )
 

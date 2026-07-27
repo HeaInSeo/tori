@@ -23,7 +23,16 @@ PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
+.PHONY: doctor test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
+
+doctor:
+	@if [[ -n "$${GOROOT:-}" && ! -d "$$GOROOT" ]]; then \
+		echo "invalid GOROOT: $$GOROOT"; \
+		echo "remove or correct the GOROOT export, then rerun make doctor"; \
+		exit 1; \
+	fi
+	@command -v go >/dev/null 2>&1 || { echo "go is not available on PATH"; exit 1; }
+	@go version
 
 test:
 	go test -race ./...

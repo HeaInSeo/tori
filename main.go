@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/seoyhaein/tori/cmd"
-	globallog "github.com/seoyhaein/tori/log"
+	"github.com/HeaInSeo/tori/cmd"
+	globallog "github.com/HeaInSeo/tori/log"
 )
 
 var logger = globallog.Log

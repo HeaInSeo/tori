@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/seoyhaein/tori/protoio"
-	pb "github.com/seoyhaein/tori/protos/ichthys/v1"
-	"github.com/seoyhaein/tori/rules"
+	"github.com/HeaInSeo/tori/protoio"
+	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
+	"github.com/HeaInSeo/tori/rules"
 )
 
 func TestGenerateFileBlock_PreservesDuplicateCollisionTypedError(t *testing.T) {
