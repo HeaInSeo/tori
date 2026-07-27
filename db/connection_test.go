@@ -103,12 +103,12 @@ func TestConnectDB_DisableForeignKeys(t *testing.T) {
 
 func createTestFolder(root, folderName string) (string, error) {
 	folderPath := filepath.Join(root, folderName)
-	if err := os.MkdirAll(folderPath, 0755); err != nil {
+	if err := os.MkdirAll(folderPath, 0750); err != nil {
 		return "", fmt.Errorf("failed to create folder %q: %w", folderPath, err)
 	}
 	filePath := filepath.Join(folderPath, "file.txt")
 	content := []byte("test content")
-	if err := os.WriteFile(filePath, content, 0644); err != nil {
+	if err := os.WriteFile(filePath, content, 0600); err != nil {
 		return "", fmt.Errorf("failed to create file %q: %w", filePath, err)
 	}
 	return folderPath, nil

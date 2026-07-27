@@ -25,7 +25,7 @@ func TestGenerateFileBlock_PreservesDuplicateCollisionTypedError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal rule set: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0600); err != nil {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestGenerateFileBlock_UsesHeaderExactValidationForMissingExtraRoles(t *test
 	if err != nil {
 		t.Fatalf("marshal rule set: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0600); err != nil {
 		t.Fatalf("write rule.json: %v", err)
 	}
 

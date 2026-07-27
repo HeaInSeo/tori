@@ -399,7 +399,7 @@ func LoadRuleSetFromFile(dirPath string) (RuleSet, error) {
 		return RuleSet{}, fmt.Errorf("rule.json not found in: %s", path)
 	}
 
-	data, err := os.ReadFile(jsonFile)
+	data, err := os.ReadFile(jsonFile) //nolint:gosec // jsonFile is derived from an operator-supplied directory path, not external input
 	if err != nil {
 		return RuleSet{}, fmt.Errorf("failed to read rule.json: %w", err)
 	}
@@ -578,7 +578,7 @@ func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) (err er
 
 	ts := time.Now().Format("20060102150405")
 	outFile := filepath.Join(outputDir, fmt.Sprintf("invalid_files_%s.txt", ts))
-	f, createErr := os.Create(outFile)
+	f, createErr := os.Create(outFile) //nolint:gosec // outFile is derived from an operator-supplied output directory, not external input
 	if createErr != nil {
 		return fmt.Errorf("failed to create %s: %w", outFile, createErr)
 	}
@@ -709,7 +709,7 @@ func ExportResultsCSV(resultMap map[int]map[string]string, headers []string, out
 	}
 
 	csvFile := filepath.Join(path, "fileblock.csv")
-	f, createErr := os.Create(csvFile)
+	f, createErr := os.Create(csvFile) //nolint:gosec // csvFile is derived from an operator-supplied output directory, not external input
 	if createErr != nil {
 		return fmt.Errorf("failed to create %s: %w", csvFile, createErr)
 	}

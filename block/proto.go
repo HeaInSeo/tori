@@ -25,7 +25,7 @@ func ConvertMapToFileBlock(rows map[int]map[string]string, headers []string, blo
 	for _, idx := range indices {
 		cols := rows[idx]
 		row := &pb.Row{
-			RowNumber: int32(idx),
+			RowNumber: int32(idx), //nolint:gosec // idx is a row index bounded by the input file's row count, never near int32 max
 			Cells:     make(map[string]string, len(cols)),
 		}
 		for colKey, value := range cols {

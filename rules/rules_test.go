@@ -513,7 +513,7 @@ func TestGenerateResolverPreviewFromDir_ReadOnlyPreviewPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal rule set: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0600); err != nil {
 		t.Fatalf("write rule.json: %v", err)
 	}
 	for _, name := range []string{
@@ -522,7 +522,7 @@ func TestGenerateResolverPreviewFromDir_ReadOnlyPreviewPath(t *testing.T) {
 		"fileblock.csv",
 		"ignored.pb",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0600); err != nil {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
@@ -558,14 +558,14 @@ func TestGenerateResolverPreviewFromDir_PreservesDuplicateCollisionError(t *test
 	if err != nil {
 		t.Fatalf("marshal rule set: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0600); err != nil {
 		t.Fatalf("write rule.json: %v", err)
 	}
 	for _, name := range []string{
 		"sample1_S1_L001_R1_001.fastq.gz",
 		"sample1__S1_L001_R1_001.fastq.gz",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0600); err != nil {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
@@ -960,13 +960,13 @@ func TestFilterGroupsByHeaders_ExactMatch(t *testing.T) {
 
 func TestListFilesExclude(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "keep.txt"), []byte(""), 0600); err != nil {
 		t.Fatalf("write keep.txt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "skip.json"), []byte(""), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "skip.json"), []byte(""), 0600); err != nil {
 		t.Fatalf("write skip.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "invalid_files"), []byte(""), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "invalid_files"), []byte(""), 0600); err != nil {
 		t.Fatalf("write invalid_files: %v", err)
 	}
 
@@ -1023,7 +1023,7 @@ func TestExportResultsCSV(t *testing.T) {
 	if err := ExportResultsCSV(result, headers, dir); err != nil {
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv")) //nolint:gosec // dir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read csv: %v", err)
 	}
@@ -1047,7 +1047,7 @@ func TestExportResultsCSV_CanonicalBehavior_DataFollowsHeaderOrdering(t *testing
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv")) //nolint:gosec // dir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read csv: %v", err)
 	}
@@ -1087,7 +1087,7 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_MissingHeaderColumnExportsEmptyC
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv")) //nolint:gosec // dir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read csv: %v", err)
 	}
@@ -1133,7 +1133,7 @@ func TestExportResultsCSV_CurrentBehaviorAnchor_ExtraRowColumnIsNotExported(t *t
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv")) //nolint:gosec // dir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read csv: %v", err)
 	}
@@ -1191,7 +1191,7 @@ func TestPipelineFacingBindingProof_SingleSyntheticCase(t *testing.T) {
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(dir, "fileblock.csv")) //nolint:gosec // dir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read csv: %v", err)
 	}
@@ -1238,7 +1238,7 @@ func TestLoadRuleSetFromFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0600); err != nil {
 		t.Fatalf("write rule.json error: %v", err)
 	}
 	loaded, err := LoadRuleSetFromFile(dir)
@@ -1266,7 +1266,7 @@ func TestLoadRuleSetFromFile_LoadsOptionalRoleNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), b, 0600); err != nil {
 		t.Fatalf("write rule.json error: %v", err)
 	}
 

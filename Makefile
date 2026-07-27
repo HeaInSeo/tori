@@ -23,7 +23,7 @@ PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security proto-lint vuln vuln-all golangci-lint govulncheck
+.PHONY: test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
 
 test:
 	go test -race ./...
@@ -105,11 +105,20 @@ lint-security: golangci-lint
 	| tee "$(REPORT_DIR)/gosec.txt"; \
 	echo "gosec_exit=$$?" | tee -a "$(REPORT_DIR)/lint-security-summary.txt"
 
+lint-security-check: golangci-lint
+	@mkdir -p "$(REPORT_DIR)"
+	$(GOLANGCI_LINT) run --enable-only sqlclosecheck $(PKGS_SECURITY) | tee "$(REPORT_DIR)/sqlclosecheck.txt"
+	$(GOLANGCI_LINT) run --enable-only gosec $(PKGS_SECURITY) | tee "$(REPORT_DIR)/gosec.txt"
+
 vuln: govulncheck
 	@mkdir -p "$(REPORT_DIR)"
 	@set +e; \
 	$(GOVULNCHECK) $(PKGS_SECURITY) 2>&1 | tee "$(REPORT_DIR)/govulncheck-core.txt"; \
 	echo "govulncheck_core_exit=$$?" | tee "$(REPORT_DIR)/govulncheck-core.summary"
+
+vuln-check: govulncheck
+	@mkdir -p "$(REPORT_DIR)"
+	$(GOVULNCHECK) $(PKGS_SECURITY) 2>&1 | tee "$(REPORT_DIR)/govulncheck-core.txt"
 
 vuln-all: govulncheck
 	@mkdir -p "$(REPORT_DIR)"
