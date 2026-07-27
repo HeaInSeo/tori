@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
 	c "github.com/HeaInSeo/tori/config"
 	dbUtils "github.com/HeaInSeo/tori/db"
 	globallog "github.com/HeaInSeo/tori/log"
 	"github.com/HeaInSeo/tori/service"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
 )
 

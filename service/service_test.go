@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/HeaInSeo/tori/config"
 	d "github.com/HeaInSeo/tori/db"
 	"github.com/HeaInSeo/tori/protoio"
 	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
+	_ "github.com/mattn/go-sqlite3"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
