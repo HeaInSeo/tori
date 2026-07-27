@@ -3,6 +3,9 @@ name: security-observe
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   observe:
     runs-on: ubuntu-latest
