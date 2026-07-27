@@ -32,7 +32,7 @@ type exportFreezeFixture struct {
 func loadFreezeFixture(t *testing.T, fileName string) freezeFixture {
 	t.Helper()
 	path := filepath.Join("testdata", "phase_a1", fileName)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is testdata/phase_a1/<literal fileName>, not external input
 	if err != nil {
 		t.Fatalf("failed to read fixture %s: %v", path, err)
 	}
@@ -46,7 +46,7 @@ func loadFreezeFixture(t *testing.T, fileName string) freezeFixture {
 func loadExportFreezeFixture(t *testing.T, fileName string) exportFreezeFixture {
 	t.Helper()
 	path := filepath.Join("testdata", "phase_a1", fileName)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is testdata/phase_a1/<literal fileName>, not external input
 	if err != nil {
 		t.Fatalf("failed to read fixture %s: %v", path, err)
 	}
@@ -228,7 +228,7 @@ func TestCurrentSemanticsFreeze_FixtureE_ExportColumnOrderCurrentSerializationBe
 		t.Fatalf("ExportResultsCSV error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outputDir, "fileblock.csv"))
+	data, err := os.ReadFile(filepath.Join(outputDir, "fileblock.csv")) //nolint:gosec // outputDir is t.TempDir()-scoped, not external input
 	if err != nil {
 		t.Fatalf("failed to read fileblock.csv: %v", err)
 	}

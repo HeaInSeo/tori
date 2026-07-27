@@ -534,13 +534,13 @@ func prepareSharedFSFixtureWorkDir(t *testing.T, sourceDir string) (string, []st
 		t.Fatalf("list shared filesystem fixture files from %s: %v", sourceDir, err)
 	}
 
-	ruleData, err := os.ReadFile(filepath.Join(sourceDir, "rule.json"))
+	ruleData, err := os.ReadFile(filepath.Join(sourceDir, "rule.json")) //nolint:gosec // sourceDir is a test fixture path, not external input
 	if err != nil {
 		t.Fatalf("read shared filesystem fixture rule.json from %s: %v", sourceDir, err)
 	}
 
 	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0600); err != nil { //nolint:gosec // workDir is t.TempDir()-scoped, not external input
 		t.Fatalf("write temp rule.json: %v", err)
 	}
 	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
@@ -563,7 +563,7 @@ func prepareSharedFSFixtureWorkDirWithRule(t *testing.T, sourceDir string, ruleS
 	}
 
 	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0600); err != nil { //nolint:gosec // workDir is t.TempDir()-scoped, not external input
 		t.Fatalf("write temp probe rule.json: %v", err)
 	}
 	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
@@ -575,7 +575,7 @@ func prepareSharedFSFixtureWorkDirWithRuleAndSelectedFiles(t *testing.T, sourceD
 	t.Helper()
 
 	for _, fileName := range fileNames {
-		if _, err := os.Stat(filepath.Join(sourceDir, fileName)); err != nil {
+		if _, err := os.Stat(filepath.Join(sourceDir, fileName)); err != nil { //nolint:gosec // test fixture path, not external input
 			t.Fatalf("stat selected shared filesystem fixture file %s: %v", filepath.Join(sourceDir, fileName), err)
 		}
 	}
@@ -586,7 +586,7 @@ func prepareSharedFSFixtureWorkDirWithRuleAndSelectedFiles(t *testing.T, sourceD
 	}
 
 	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, "rule.json"), ruleData, 0600); err != nil { //nolint:gosec // workDir is t.TempDir()-scoped, not external input
 		t.Fatalf("write temp probe rule.json: %v", err)
 	}
 	writeFixtureFileNamePlaceholders(t, workDir, fileNames)
@@ -598,7 +598,7 @@ func writeFixtureFileNamePlaceholders(t *testing.T, workDir string, fileNames []
 	t.Helper()
 
 	for _, name := range fileNames {
-		if err := os.WriteFile(filepath.Join(workDir, name), []byte("fixture"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(workDir, name), []byte("fixture"), 0600); err != nil { //nolint:gosec // workDir is t.TempDir()-scoped, not external input
 			t.Fatalf("write temp fixture placeholder %s: %v", name, err)
 		}
 	}
@@ -617,7 +617,7 @@ func loadSharedFSFixtureRuleSet(t *testing.T, workDir string) rules.RuleSet {
 func assertNoGeneratedPreviewOutputs(t *testing.T, workDir string) {
 	t.Helper()
 
-	if _, err := os.Stat(filepath.Join(workDir, "fileblock.csv")); err == nil {
+	if _, err := os.Stat(filepath.Join(workDir, "fileblock.csv")); err == nil { //nolint:gosec // test fixture path, not external input
 		t.Fatalf("expected preview path not to write fileblock.csv")
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat preview fileblock.csv: %v", err)
@@ -644,12 +644,12 @@ func assertGeneratedFileBlockOutputs(t *testing.T, workDir string) {
 	t.Helper()
 
 	csvPath := filepath.Join(workDir, "fileblock.csv")
-	if _, err := os.Stat(csvPath); err != nil {
+	if _, err := os.Stat(csvPath); err != nil { //nolint:gosec // test fixture path, not external input
 		t.Fatalf("expected generated fileblock.csv at %s: %v", csvPath, err)
 	}
 
 	pbPath := filepath.Join(workDir, filepath.Base(workDir)+"files.pb")
-	if _, err := os.Stat(pbPath); err != nil {
+	if _, err := os.Stat(pbPath); err != nil { //nolint:gosec // test fixture path, not external input
 		t.Fatalf("expected generated protobuf output at %s: %v", pbPath, err)
 	}
 }

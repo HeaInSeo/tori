@@ -33,14 +33,14 @@ func createLargeTestStructure(rootDir string, numDirs, numFilesPerDir int, creat
 	// 하위 디렉토리 및 파일 생성
 	for i := 0; i < numDirs; i++ {
 		subDir := filepath.Join(rootDir, fmt.Sprintf("dir_%d", i))
-		if err := os.Mkdir(subDir, 0755); err != nil {
+		if err := os.Mkdir(subDir, 0750); err != nil {
 			return err
 		}
 		// 옵션에 따라 rule.json 파일 생성
 		if createRule {
 			rulePath := filepath.Join(subDir, "rule.json")
 			// rule.json 내용은 빈 객체("{}")로 설정 (필요에 따라 수정 가능)
-			if err := os.WriteFile(rulePath, []byte("{}"), 0644); err != nil {
+			if err := os.WriteFile(rulePath, []byte("{}"), 0600); err != nil {
 				return err
 			}
 		}
@@ -49,7 +49,7 @@ func createLargeTestStructure(rootDir string, numDirs, numFilesPerDir int, creat
 			filePath := filepath.Join(subDir, fmt.Sprintf("file_%d.txt", j))
 			// 파일마다 내용 길이를 다르게 설정
 			content := []byte(fmt.Sprintf("Content of file %d in directory %d", j, i))
-			if err := os.WriteFile(filePath, content, 0644); err != nil {
+			if err := os.WriteFile(filePath, content, 0600); err != nil {
 				return err
 			}
 		}
@@ -133,7 +133,7 @@ func TestGetCurrentFolderFileInfo(t *testing.T) {
 		expectedFiles := []string{}
 		for name, content := range fileData {
 			filePath := filepath.Join(tmpDir, name)
-			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+			if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
 				t.Fatalf("failed to write file %s: %v", name, err)
 			}
 			// determine if file should be included according to exclusions below
@@ -382,10 +382,10 @@ func TestStoreFilesFolderInfo_Integration_RealDirectory(t *testing.T) {
 	file2Path := filepath.Join(tmpDir, "file2.txt")
 	content1 := []byte("Hello, World!")                // 약 13 bytes
 	content2 := []byte("This is a test file content.") // 예시 문자열
-	if err := os.WriteFile(file1Path, content1, 0644); err != nil {
+	if err := os.WriteFile(file1Path, content1, 0600); err != nil {
 		t.Fatalf("failed to write file1: %v", err)
 	}
-	if err := os.WriteFile(file2Path, content2, 0644); err != nil {
+	if err := os.WriteFile(file2Path, content2, 0600); err != nil {
 		t.Fatalf("failed to write file2: %v", err)
 	}
 
@@ -442,7 +442,7 @@ func TestStoreFilesFolderInfo_Integration_RealDirectory(t *testing.T) {
 	}
 
 	// DB 에서 File 정보 조회
-	rows, err := db.Query("SELECT name, size FROM files WHERE folder_id = ?", folderID)
+	rows, err := db.Query("SELECT name, size FROM files WHERE folder_id = ?", folderID) //nolint:sqlclosecheck // closed via the defer func(rows) below; sqlclosecheck doesn't trace closures
 	if err != nil {
 		t.Fatalf("failed to query files: %v", err)
 	}
@@ -588,7 +588,7 @@ func TestStoreFilesFolderInfo_LargeStructureIntegration(t *testing.T) {
 		if err := rows.Err(); err != nil {
 			t.Fatalf("error iterating file rows for %s: %v", subDirPath, err)
 		}
-		if err := rows.Close(); err != nil {
+		if err := rows.Close(); err != nil { //nolint:sqlclosecheck // rows is re-acquired each loop iteration; deferring here would hold every iteration's rows open until the enclosing test function returns instead of closing at end-of-iteration
 			t.Fatalf("failed to close rows for %s: %v", subDirPath, err)
 		}
 
@@ -719,7 +719,7 @@ func TestStoreFilesFolderInfo_TooLargeStructureIntegration(t *testing.T) {
 		if err := rows.Err(); err != nil {
 			t.Fatalf("error iterating file rows for %s: %v", subDirPath, err)
 		}
-		if err := rows.Close(); err != nil {
+		if err := rows.Close(); err != nil { //nolint:sqlclosecheck // rows is re-acquired each loop iteration; deferring here would hold every iteration's rows open until the enclosing test function returns instead of closing at end-of-iteration
 			t.Fatalf("failed to close rows for %s: %v", subDirPath, err)
 		}
 

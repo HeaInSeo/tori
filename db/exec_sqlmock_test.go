@@ -442,7 +442,10 @@ func TestQuerySQL_FileNotFound(t *testing.T) {
 		}
 	}()
 
-	_, err = querySQL(context.Background(), db, "nonexistent.sql")
+	rows, err := querySQL(context.Background(), db, "nonexistent.sql")
+	if rows != nil {
+		defer func() { _ = rows.Close() }()
+	}
 	if err == nil {
 		t.Fatalf("expected error for nonexistent file, got nil")
 	}
@@ -466,7 +469,10 @@ func TestQuerySQL_EmptyFile(t *testing.T) {
 		}
 	}()
 
-	_, err = querySQL(context.Background(), db, "test_empty.sql")
+	rows, err := querySQL(context.Background(), db, "test_empty.sql")
+	if rows != nil {
+		defer func() { _ = rows.Close() }()
+	}
 	if err == nil {
 		t.Fatalf("expected error for empty SQL file, got nil")
 	}
@@ -531,7 +537,10 @@ func TestQuerySQL_QueryError(t *testing.T) {
 	expectedErr := errors.New("query error")
 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WillReturnError(expectedErr)
-	_, err = querySQL(context.Background(), db, "test_select_fail.sql")
+	rows, err := querySQL(context.Background(), db, "test_select_fail.sql")
+	if rows != nil {
+		defer func() { _ = rows.Close() }()
+	}
 	if err == nil {
 		t.Fatalf("expected error from QueryContext, got nil")
 	}
