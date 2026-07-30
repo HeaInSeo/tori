@@ -49,6 +49,9 @@ jobs:
       - name: Buf format check
         run: buf format --exit-code -d protos
 
+      - name: Fetch base branch ref
+        run: git fetch origin master:refs/heads/master
+
       - name: Buf breaking change check
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
