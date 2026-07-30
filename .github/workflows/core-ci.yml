@@ -43,6 +43,8 @@ jobs:
         with:
           input: protos
           lint: true
+          format: true
+          breaking: true
 
   core-baseline:
     runs-on: ubuntu-latest
