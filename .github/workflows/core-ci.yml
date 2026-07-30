@@ -33,18 +33,29 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          version: "1.54.0"
 
       - name: Buf lint
-        uses: bufbuild/buf-action@v1
-        with:
-          input: protos
-          lint: true
-          format: true
-          breaking: true
+        run: buf lint protos
+
+      - name: Buf format check
+        run: buf format --exit-code -d protos
+
+      - name: Buf breaking change check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            buf breaking protos --against '.git#branch=master,subdir=protos'
+          else
+            buf breaking protos --against '.git#ref=HEAD~1,subdir=protos'
+          fi
 
   core-baseline:
     runs-on: ubuntu-latest
