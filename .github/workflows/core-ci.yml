@@ -72,3 +72,13 @@ jobs:
 
       - name: Run vulnerability guardrail
         run: make vuln-check
+
+      - name: Generate coverage report
+        run: make coverage
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tori-coverage
+          path: reports/

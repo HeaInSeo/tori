@@ -23,7 +23,7 @@ PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
 PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
 
-.PHONY: doctor test test-core test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
+.PHONY: doctor test test-core coverage test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
 
 doctor:
 	@if [[ -n "$${GOROOT:-}" && ! -d "$$GOROOT" ]]; then \
@@ -39,6 +39,11 @@ test:
 
 test-core: test-guardrail
 	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE)
+
+coverage:
+	@mkdir -p "$(REPORT_DIR)"
+	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE) -coverprofile="$(REPORT_DIR)/cover.out" -covermode=atomic
+	go tool cover -func="$(REPORT_DIR)/cover.out" | tee "$(REPORT_DIR)/coverage.txt"
 
 test-shared-fs-fixtures:
 	TORI_SHARED_FIXTURE_ROOT="$(TORI_SHARED_FIXTURE_ROOT)" go test -race ./block -run TestSharedFSFixtureSmoke
