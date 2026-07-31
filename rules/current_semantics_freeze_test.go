@@ -189,8 +189,13 @@ func TestCurrentSemanticsFreeze_FixtureC_TokenizationConsecutiveDelimiters(t *te
 
 // This test records known as-is overwrite behavior for duplicate collisions.
 // It does not assert the final intended duplicate handling policy.
+//
+// Tracking: HeaInSeo/tori#23. Revisit when A-2 duplicate error policy lands -
+// either re-enable this test against the new intended behavior, or retire it
+// explicitly (matching Fixture E's precedent below) rather than leaving it
+// skipped indefinitely.
 func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *testing.T) {
-	t.Skip("historical A-1 anchor: overwrite behavior was recorded before A-2 duplicate error policy")
+	t.Skip("historical A-1 anchor: overwrite behavior was recorded before A-2 duplicate error policy; tracked in HeaInSeo/tori#23")
 
 	fx := loadFreezeFixture(t, "fixture_d_duplicate_collision_current_behavior.json")
 
@@ -217,8 +222,12 @@ func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *te
 
 // This test records the historical serialization/output behavior only.
 // It is retired from the active baseline after the first canonical column ordering patch.
+//
+// Tracking: HeaInSeo/tori#23. Deliberately/permanently retired (unlike
+// Fixture D above, this isn't pending future work) - kept for historical
+// reference only.
 func TestCurrentSemanticsFreeze_FixtureE_ExportColumnOrderCurrentSerializationBehavior(t *testing.T) {
-	t.Skip("historical A-1 anchor retired from active baseline after canonical header-ordered export patch")
+	t.Skip("historical A-1 anchor retired from active baseline after canonical header-ordered export patch; tracked in HeaInSeo/tori#23")
 
 	fx := loadExportFreezeFixture(t, "fixture_e_export_column_order_current_serialization_behavior.json")
 	resultMap := toIndexedRows(t, fx.ResultMap)
