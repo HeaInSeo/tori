@@ -30,3 +30,6 @@ lint_results.json
 # Local tool binaries
 bin/buf
 bin/govulncheck
+
+# spec-kit per-feature state (not tracked)
+.specify/feature.json
