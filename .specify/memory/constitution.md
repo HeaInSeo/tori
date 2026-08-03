@@ -39,7 +39,7 @@ them; on any conflict, §4 wins.
 - **gosec** (IMPLEMENTED — `make lint-security-check`): static security analysis, blocking.
 - **govulncheck** (IMPLEMENTED — `make vuln-check`): vulnerability scan, blocking.
 - **golangci-lint** (IMPLEMENTED — `make lint`): lint gate.
-- **race tests** (IMPLEMENTED — `make test`, `go test -race -shuffle=on`): concurrency safety.
+- **race tests** (IMPLEMENTED — enforced by required check `core-baseline`, which runs `make test-core` with `-race -shuffle=on`): concurrency safety.
 
 ## §1.10 — "do not record what you did not observe"
 
