@@ -39,7 +39,7 @@ them; on any conflict, §4 wins.
 - **gosec** (IMPLEMENTED — `make lint-security-check`): static security analysis, blocking.
 - **govulncheck** (IMPLEMENTED — `make vuln-check`): vulnerability scan, blocking.
 - **golangci-lint** (IMPLEMENTED — `make lint`): lint gate.
-- **race tests** (IMPLEMENTED — `make test`, `go test -race -shuffle=on`): concurrency safety.
+- **race tests, core packages** (IMPLEMENTED — enforced by required check `core-baseline`, which runs `make test-core` with `-race -shuffle=on`, covering only `config`/`db`/`rules`/`block`/`cmd/...`): concurrency safety **for core packages only**. Packages outside that set (`service`, `transport/grpc`, `protoio`, `log`, root) have **no required race coverage** (the root guardrail runs without `-race`) — that is a PROPOSED gap, not an enforced guarantee.
 
 ## §1.10 — "do not record what you did not observe"
 
