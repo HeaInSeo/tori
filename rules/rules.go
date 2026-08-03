@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HeaInSeo/tori/internal/utils"
 	globallog "github.com/HeaInSeo/tori/log"
-	"github.com/seoyhaein/utils"
 )
 
 var logger = globallog.Log
