@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	u "github.com/seoyhaein/utils"
+	u "github.com/HeaInSeo/tori/internal/utils"
 )
 
 var (

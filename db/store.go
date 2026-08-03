@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	u "github.com/seoyhaein/utils"
+	u "github.com/HeaInSeo/tori/internal/utils"
 )
 
 // SaveFolders rootPath 하위의 모든 Folder 에 대해 파일 정보를 DB에 삽입함.

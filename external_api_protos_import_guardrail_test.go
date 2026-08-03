@@ -10,10 +10,12 @@ import (
 	"testing"
 )
 
-const externalAPIProtosImport = "github.com/seoyhaein/api-protos/gen/go/datablock/ichthys"
+// forbiddenImportPrefix is matched as a prefix against every Go import path in
+// the repo. It covers the whole seoyhaein/ namespace, not just api-protos.
+const forbiddenImportPrefix = "github.com/seoyhaein/"
 
 // forbiddenModulePrefix is checked against go.mod and go.sum verbatim.
-const forbiddenModulePrefix = "github.com/seoyhaein/api-protos"
+const forbiddenModulePrefix = "github.com/seoyhaein/"
 
 func TestExternalAPIProtosImportGuardrail(t *testing.T) {
 	t.Helper()
@@ -44,7 +46,7 @@ func TestExternalAPIProtosImportGuardrail(t *testing.T) {
 			return err
 		}
 		for _, imp := range file.Imports {
-			if strings.Trim(imp.Path.Value, "\"") == externalAPIProtosImport {
+			if strings.HasPrefix(strings.Trim(imp.Path.Value, "\""), forbiddenImportPrefix) {
 				found = append(found, filepath.ToSlash(path))
 				break
 			}
@@ -58,7 +60,7 @@ func TestExternalAPIProtosImportGuardrail(t *testing.T) {
 		t.Fatal("guardrail scanned 0 Go files — working directory is likely wrong")
 	}
 	if len(found) > 0 {
-		t.Fatalf("external api-protos import must be fully removed, found in %v", found)
+		t.Fatalf("external github.com/seoyhaein/ imports must be fully removed, found in %v", found)
 	}
 }
 
