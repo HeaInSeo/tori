@@ -42,6 +42,9 @@ jobs:
       - uses: bufbuild/buf-setup-action@v1
         with:
           version: "1.54.0"
+          # Authenticate the tool-download GitHub API call to avoid anonymous
+          # rate limiting (429 on the Buf release lookup).
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Buf lint
         run: buf lint protos
