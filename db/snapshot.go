@@ -39,6 +39,17 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return res, nil
 	}
 
+	// 1a) A confirmed observation with no recorded witness is either a true bootstrap
+	//     or a validated legacy adoption (observe proved every accepted folder is
+	//     present on disk). Backfill the continuity witness now so the source anchor
+	//     becomes durable even when this run is otherwise unchanged; a wrong/empty
+	//     mount never reaches here because observe HOLDs it first.
+	//     establishWitnessIfBootstrap is a no-op once a witness exists.
+	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
+		globallog.Log.Errorf("source witness 백필 실패: %v", err)
+		return SyncResult{}, err
+	}
+
 	// 2) Reconcile any incomplete prior acceptance BEFORE we can report "unchanged".
 	//    This closes I10: DB may have advanced while the projection stayed stale.
 	reconciled, err := reconcileIfPending(ctx, db, rootPath)

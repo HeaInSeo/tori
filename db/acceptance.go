@@ -328,25 +328,55 @@ func observe(ctx context.Context, db *sql.DB, rootPath string, foldersExclusions
 	if err != nil {
 		return SyncResult{}, err
 	}
-	switch {
-	case recorded == "":
-		// Bootstrap: no accepted snapshot exists yet, so there is nothing to
-		// protect. The witness is established as part of acceptance.
-	case ambiguous:
-		return SyncResult{
-			Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
-			Reason: "source scope UNKNOWN: multiple/ambiguous continuity markers at root",
-		}, nil
-	case fileToken == "":
-		return SyncResult{
-			Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
-			Reason: "source scope UNKNOWN: continuity witness absent (a readable path is not source-continuity proof)",
-		}, nil
-	case fileToken != recorded:
-		return SyncResult{
-			Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
-			Reason: "source scope UNKNOWN: continuity witness does not match the accepted source",
-		}, nil
+	if recorded == "" {
+		// No continuity witness recorded. This is a safe bootstrap ONLY when there is
+		// genuinely nothing accepted to protect. A legacy/pre-feature DB (or a witness
+		// write interrupted after the inventory was committed) can hold accepted
+		// inventory with recorded=="": treating that as a bootstrap would let a
+		// readable-but-wrong or empty mount be adopted and wipe the accepted inventory
+		// (the exact I1 failure this boundary exists to prevent). So the bootstrap
+		// branch is gated on an EMPTY accepted inventory, not on the absent witness.
+		empty, eErr := acceptedInventoryEmpty(db)
+		if eErr != nil {
+			return SyncResult{}, eErr
+		}
+		if !empty {
+			// Legacy adoption is only safe when the current source still carries every
+			// accepted folder (plausibly the same source, not a wrong/empty mount). If
+			// any accepted folder is absent we cannot prove continuity → HOLD; the
+			// witness is NOT backfilled here, so a wrong mount is never adopted.
+			missing, mErr := firstMissingAcceptedFolder(db)
+			if mErr != nil {
+				return SyncResult{}, mErr
+			}
+			if missing != "" {
+				return SyncResult{
+					Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
+					Reason: fmt.Sprintf("source scope UNKNOWN: accepted inventory exists without a continuity witness and the source diverges (%s missing); refusing to accept — re-bootstrap required", missing),
+				}, nil
+			}
+			// Every accepted folder is present → validated legacy adoption; SyncFolders
+			// backfills the witness before any accept/unchanged.
+		}
+		// Empty inventory → true bootstrap; witness established at acceptance.
+	} else {
+		switch {
+		case ambiguous:
+			return SyncResult{
+				Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
+				Reason: "source scope UNKNOWN: multiple/ambiguous continuity markers at root",
+			}, nil
+		case fileToken == "":
+			return SyncResult{
+				Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
+				Reason: "source scope UNKNOWN: continuity witness absent (a readable path is not source-continuity proof)",
+			}, nil
+		case fileToken != recorded:
+			return SyncResult{
+				Outcome: OutcomeDegradedHold, Scope: ScopeUnknown, Coverage: CoverageComplete,
+				Reason: "source scope UNKNOWN: continuity witness does not match the accepted source",
+			}, nil
+		}
 	}
 
 	// (2) Coverage completeness: every in-scope subfolder must be fully readable
@@ -368,6 +398,36 @@ func observe(ctx context.Context, db *sql.DB, rootPath string, foldersExclusions
 	}
 
 	return SyncResult{Outcome: OutcomeUnchanged, Scope: ScopeConfirmed, Coverage: CoverageComplete}, nil
+}
+
+// acceptedInventoryEmpty reports whether the accepted DB holds no folders. It
+// distinguishes a true bootstrap (nothing to protect) from a legacy DB that holds
+// accepted inventory but has not yet recorded a continuity witness.
+func acceptedInventoryEmpty(db *sql.DB) (bool, error) {
+	folders, err := GetFoldersFromDB(db)
+	if err != nil {
+		return false, err
+	}
+	return len(folders) == 0, nil
+}
+
+// firstMissingAcceptedFolder returns the path of the first accepted folder that is
+// no longer present as a directory on disk, or "" when every accepted folder is
+// present. It is the source-continuity check used for legacy adoption when no
+// witness has been recorded yet: an empty/wrong mount will be missing the accepted
+// folders and must therefore be refused rather than adopted.
+func firstMissingAcceptedFolder(db *sql.DB) (string, error) {
+	folders, err := GetFoldersFromDB(db)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range folders {
+		info, statErr := os.Stat(f.Path)
+		if statErr != nil || !info.IsDir() {
+			return f.Path, nil
+		}
+	}
+	return "", nil
 }
 
 // buildFolderFilesFromDB reconstructs the [folderPath, name...] projection input

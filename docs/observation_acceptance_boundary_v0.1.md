@@ -1,4 +1,4 @@
-# Observation Acceptance Boundary (TDI-I1 + I10) — v0.1
+# Observation Acceptance Boundary (TDI-I1 + I10) — v0.2
 
 Status: implemented (Lane A, bounded). Scope: the existing local/shared POSIX
 snapshot path only. This note describes what the boundary guarantees and,
@@ -42,8 +42,13 @@ scope CONFIRMED + COMPLETE
   with that token is present. Detection uses `os.ReadDir` only (never a
   content read), and the marker is a top-level file, so it is never part of the
   tracked inventory. An empty detached mount or a wrong replacement mount does not
-  carry our token → scope UNKNOWN → HOLD. A first run with no recorded token is a
-  legitimate bootstrap and establishes the witness as part of acceptance.
+  carry our token → scope UNKNOWN → HOLD. "No recorded token" is treated as a
+  legitimate bootstrap **only when the accepted inventory is empty** (nothing to
+  protect). A legacy/pre-feature DB holds accepted inventory with no recorded token;
+  it is adopted **only** when the current source still carries every accepted folder
+  (plausibly the same source), and the witness is then backfilled. If any accepted
+  folder is missing, the source is refused (scope UNKNOWN → HOLD) rather than
+  adopted, so a readable-but-wrong/empty mount can never wipe the accepted inventory.
 
 - **Coverage encoding: {Complete, Partial}.** Every in-scope subfolder must be
   fully readable before any mutation; an unreadable subfolder → Partial → HOLD.
@@ -60,7 +65,9 @@ scope CONFIRMED + COMPLETE
   On restart, a `pending` marker forces a rebuild-from-DB **before** any
   "unchanged" can be returned. The rebuild is idempotent, so re-entry converges. A
   crash can therefore never leave `DB=S2, DataBlock=S1, next diff=empty` silently
-  accepted.
+  accepted. An **empty** accepted inventory is a representable state: it projects to
+  an empty `DataBlock` (not an error), so removing the last tracked folder converges
+  to `clean` instead of wedging the acceptance in a permanent `pending` state.
 
 ## Status surface
 
@@ -81,16 +88,36 @@ scope CONFIRMED + COMPLETE
 
 ## Known limitation — bootstrap
 
-The witness protects continuity only *after* the first accept records a token. On a
-true first run (`recorded == ""`) there is no accepted state to protect, so the
-bootstrap branch proceeds without a continuity check and establishes the witness on
-whatever source is observed. Consequently, if the very first accept crashes after
-the DB mutation but before the token is recorded, a restart against a *different*
-mount would bootstrap there. This window is inherent to any witness bootstrap and
-is out of scope for this boundary; migrating a pre-existing (pre-witness) DB has the
-same one-time exposure until its first accept under this code. An interrupted
-bootstrap that already wrote a marker file is handled: restart *adopts* the single
-existing marker rather than writing a second one.
+Bootstrap (`recorded == ""`) is gated on an **empty accepted inventory**, so a
+legacy/pre-feature DB with inventory is never treated as an unprotected bootstrap:
+it is adopted only when every accepted folder is still present under the current
+source, and refused (HOLD) otherwise. A legacy DB whose source *legitimately* lost
+a whole folder before upgrade therefore HOLDs (retains prior state) rather than
+accepting — safe, but it needs an explicit re-bootstrap to resume; that operator
+path is a follow-up.
+
+The residual window is only a *genuine* first run (empty inventory): if the very
+first accept crashes after the DB mutation but before the token is recorded, a
+restart against a *different* mount would bootstrap there. This window is inherent to
+any witness bootstrap and is out of scope. An interrupted bootstrap that already
+wrote a marker file is handled: restart *adopts* the single existing marker rather
+than writing a second one.
+
+## Known limitation — reconcile vs. projection inputs
+
+`reconcileIfPending` rebuilds the projection from the accepted DB. A folder that
+*vanished* from disk during the pending window is skipped (reconcile stays
+convergent, and the normal diff then prunes it). However, a folder that is still
+present but whose `rule.json` was removed or corrupted during that window makes
+projection generation hard-error, so reconcile cannot complete until the file is
+restored — blocking sync for all folders. Degrading such a folder to a surfaced
+skip is a follow-up in the `rules`/`block` layer.
+
+Separately, if a crash left `pending` and the source is subsequently classified
+UNKNOWN/PARTIAL, `SyncFolders` HOLDs at observation *before* reconciling, so the DB
+may stay ahead of a stale projection until the source re-confirms. This is
+self-healing (recoverable, not data loss); the HOLD reason should not be read as a
+guarantee that DB and projection are mutually consistent during that window.
 
 ## Known deferred item
 

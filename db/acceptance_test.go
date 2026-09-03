@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -730,4 +731,198 @@ func folderIDForTest(t *testing.T, db *sql.DB, path string) int64 {
 	}
 	t.Fatalf("folder %s not found in DB", path)
 	return 0
+}
+
+// --- I1: legacy DB adoption (no recorded witness) ------------------------------
+//
+// Regression tests for the bootstrap-conflation defect: "no witness recorded" is
+// NOT "nothing accepted to protect". A pre-feature / legacy DB holds accepted
+// inventory with recorded=="". Bootstrap must be gated on an EMPTY accepted
+// inventory, and a legacy DB may only be adopted when the current source still
+// carries every accepted folder — otherwise a readable-but-wrong/empty mount would
+// be adopted and wipe the accepted inventory.
+
+// simulateLegacyDB removes the recorded continuity witness and its on-disk marker,
+// leaving the accepted inventory in place — i.e. exactly the state of a DB that was
+// populated before this feature existed.
+func simulateLegacyDB(t *testing.T, db *sql.DB, root string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(),
+		"DELETE FROM snapshot_meta WHERE key = ?", metaKeySourceWitness); err != nil {
+		t.Fatalf("clear witness meta: %v", err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("readdir root: %v", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), witnessPrefix) {
+			if err := os.Remove(filepath.Join(root, e.Name())); err != nil {
+				t.Fatalf("remove marker: %v", err)
+			}
+		}
+	}
+}
+
+func recordedWitnessForTest(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	v, _, err := metaGet(context.Background(), db, metaKeySourceWitness)
+	if err != nil {
+		t.Fatalf("metaGet witness: %v", err)
+	}
+	return v
+}
+
+func acceptanceStateForTest(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	st, err := readAcceptanceState(context.Background(), db)
+	if err != nil {
+		t.Fatalf("readAcceptanceState: %v", err)
+	}
+	return st
+}
+
+func markerPresent(t *testing.T, root string) bool {
+	t.Helper()
+	tok, _, err := readWitnessToken(root)
+	if err != nil {
+		t.Fatalf("readWitnessToken: %v", err)
+	}
+	return tok != ""
+}
+
+// I1-T09: legacy DB (no recorded witness) + the SAME mount path emptied of its
+// accepted content → HOLD, accepted inventory retained (NOT wiped/adopted).
+// This is the bootstrap-conflation wipe the fix closes.
+func TestI1_T09_LegacyDBNoWitnessWrongMountHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+	writeRuleFolder(t, root, "set_b", pairFiles("sample2")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	foldersBefore := countFolders(t, db)
+	filesBefore := countFiles(t, db)
+	dbBytesBefore := readFileBytes(t, filepath.Join(root, "datablock.pb"))
+
+	// Legacy state: witness cleared, inventory intact.
+	simulateLegacyDB(t, db, root)
+	if recordedWitnessForTest(t, db) != "" {
+		t.Fatalf("precondition: witness should be cleared")
+	}
+	// Wrong/empty mount at the SAME path: the accepted folders are gone but the
+	// root stays readable (the realistic detached-then-remounted case).
+	if err := os.RemoveAll(filepath.Join(root, "set_a")); err != nil {
+		t.Fatalf("empty set_a: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "set_b")); err != nil {
+		t.Fatalf("empty set_b: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders should HOLD, not error: %v", err)
+	}
+	if res.Outcome != OutcomeDegradedHold || res.Scope != ScopeUnknown {
+		t.Fatalf("expected degraded-hold/UNKNOWN, got %v/%v (%s)", res.Outcome, res.Scope, res.Reason)
+	}
+	if got := countFolders(t, db); got != foldersBefore || foldersBefore == 0 {
+		t.Fatalf("legacy DB inventory wiped by wrong mount: folders %d -> %d", foldersBefore, got)
+	}
+	if got := countFiles(t, db); got != filesBefore {
+		t.Fatalf("legacy DB files wiped by wrong mount: files %d -> %d", filesBefore, got)
+	}
+	if got := readFileBytes(t, filepath.Join(root, "datablock.pb")); string(got) != string(dbBytesBefore) {
+		t.Fatalf("projection overwritten by wrong mount adopted as bootstrap")
+	}
+	// No wrong mount may be adopted: the witness must remain unrecorded.
+	if recordedWitnessForTest(t, db) != "" {
+		t.Fatalf("wrong mount was adopted (witness backfilled) — must not happen")
+	}
+}
+
+// I1-T10: legacy DB (no recorded witness) + the same, intact source → validated
+// adoption: proceeds, backfills the continuity witness, and does not wipe.
+func TestI1_T10_LegacyDBNoWitnessMatchingSourceAdopts(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+	writeRuleFolder(t, root, "set_b", pairFiles("sample2")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	foldersBefore := countFolders(t, db)
+
+	simulateLegacyDB(t, db, root)
+	if markerPresent(t, root) {
+		t.Fatalf("precondition: marker should be removed")
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeDegradedHold {
+		t.Fatalf("matching legacy source should be adopted, got HOLD (%s)", res.Reason)
+	}
+	if got := countFolders(t, db); got != foldersBefore {
+		t.Fatalf("adoption altered inventory: folders %d -> %d", foldersBefore, got)
+	}
+	// The continuity witness must now be backfilled and durable on disk, so a later
+	// wrong mount is protected.
+	if recordedWitnessForTest(t, db) == "" {
+		t.Fatalf("witness was not backfilled on legacy adoption")
+	}
+	if !markerPresent(t, root) {
+		t.Fatalf("witness marker not materialized on legacy adoption")
+	}
+}
+
+// I10-T06: removing the last tracked folder drives the accepted inventory to empty.
+// The projection must be regenerable from an empty DB (empty DataBlock), so
+// acceptance converges to clean instead of wedging in a permanent pending state.
+func TestI10_T06_RemoveLastFolderConvergesNotWedged(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "set_only", pairFiles("sample1")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	if countFolders(t, db) != 1 {
+		t.Fatalf("precondition: expected exactly 1 tracked folder")
+	}
+	// Genuine removal of the only folder from the confirmed source.
+	if err := os.RemoveAll(filepath.Join(root, "set_only")); err != nil {
+		t.Fatalf("remove set_only: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders wedged on empty-inventory projection: %v", err)
+	}
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("expected accepted-update, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if got := countFolders(t, db); got != 0 {
+		t.Fatalf("removal not accepted: %d folders remain", got)
+	}
+	if st := acceptanceStateForTest(t, db); st != acceptanceClean {
+		t.Fatalf("acceptance wedged: state=%q, want clean", st)
+	}
+	if _, err := os.Stat(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("empty projection not written: %v", err)
+	}
+
+	// Re-entry must converge to a quiescent unchanged state, not re-wedge.
+	res, err = SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("second SyncFolders errored: %v", err)
+	}
+	if res.Outcome != OutcomeUnchanged {
+		t.Fatalf("empty accepted snapshot did not settle to unchanged, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if st := acceptanceStateForTest(t, db); st != acceptanceClean {
+		t.Fatalf("state not clean after settle: %q", st)
+	}
 }

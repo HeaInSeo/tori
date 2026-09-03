@@ -1,7 +1,6 @@
 package block
 
 import (
-	"fmt"
 	"sort"
 
 	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
@@ -37,12 +36,13 @@ func ConvertMapToFileBlock(rows map[int]map[string]string, headers []string, blo
 	return fb
 }
 
-// MergeFileBlocksFromData combines FileBlocks into one DataBlock.
+// MergeFileBlocksFromData combines FileBlocks into one DataBlock. An empty input
+// yields a valid empty DataBlock (Blocks == nil) rather than an error: an empty
+// accepted inventory is a representable state, and the acceptance-boundary
+// reconcile path (db.regenerateProjectionFromDB) must be able to project it.
+// Otherwise removing the last tracked folder would fail projection generation
+// after the DB mutation already committed, wedging acceptance in a pending state.
 func MergeFileBlocksFromData(inputBlocks []*pb.FileBlock) (*pb.DataBlock, error) {
-	if len(inputBlocks) == 0 {
-		return nil, fmt.Errorf("no input blocks provided")
-	}
-
 	return &pb.DataBlock{
 		UpdatedAt: timestamppb.Now(),
 		Blocks:    inputBlocks,
