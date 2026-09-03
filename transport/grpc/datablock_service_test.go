@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	dbUtils "github.com/HeaInSeo/tori/db"
 	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -22,8 +23,8 @@ func (s stubDataBlockService) SaveFolders(context.Context) error {
 	return nil
 }
 
-func (s stubDataBlockService) SyncFolders(context.Context) (bool, error) {
-	return false, nil
+func (s stubDataBlockService) SyncFolders(context.Context) (dbUtils.SyncResult, error) {
+	return dbUtils.SyncResult{Outcome: dbUtils.OutcomeUnchanged}, nil
 }
 
 func TestNewFetchDataBlockResponseNilBuildsNoUpdatePayload(t *testing.T) {

@@ -78,6 +78,26 @@ func (fd *FolderDiff) UpsertFolder(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// UpsertFolderTx 는 UpsertFolder 의 트랜잭션 버전으로, 단일 tx 내에서 폴더 변경을 적용한다.
+func (fd *FolderDiff) UpsertFolderTx(ctx context.Context, tx *sql.Tx) error {
+	if fd.ChangeType == "removed" {
+		if err := execSQLTx(ctx, tx, "delete_folder.sql", fd.FolderID); err != nil {
+			return fmt.Errorf("failed to delete folder id %d, path %s: %w", fd.FolderID, fd.Path, err)
+		}
+		return nil
+	}
+	if fd.FolderID == 0 {
+		if err := execSQLTx(ctx, tx, "insert_folder.sql", fd.Path, fd.DiskTotalSize, fd.DiskFileCount, fd.CreatedTime); err != nil {
+			return fmt.Errorf("failed to insert folder for path %s: %w", fd.Path, err)
+		}
+	} else {
+		if err := execSQLTx(ctx, tx, "update_folder.sql", fd.DiskTotalSize, fd.DiskFileCount, fd.FolderID); err != nil {
+			return fmt.Errorf("failed to update folder id %d, path %s: %w", fd.FolderID, fd.Path, err)
+		}
+	}
+	return nil
+}
+
 // UpsertDelFile FileChange 정보를 기반으로 DB의 파일 정보를 업데이트하거나, 없으면 삽입 또는 삭제.
 func (fc *FileChange) UpsertDelFile(ctx context.Context, db *sql.DB) error {
 	switch fc.ChangeType {
@@ -91,6 +111,27 @@ func (fc *FileChange) UpsertDelFile(ctx context.Context, db *sql.DB) error {
 		}
 	case "removed":
 		if err := execSQL(ctx, db, "delete_file.sql", fc.FileID); err != nil {
+			return fmt.Errorf("failed to delete file %s: %w", fc.Name, err)
+		}
+	default:
+		return fmt.Errorf("unknown change type: %s", fc.ChangeType)
+	}
+	return nil
+}
+
+// UpsertDelFileTx 는 UpsertDelFile 의 트랜잭션 버전으로, 단일 tx 내에서 파일 변경을 적용한다.
+func (fc *FileChange) UpsertDelFileTx(ctx context.Context, tx *sql.Tx) error {
+	switch fc.ChangeType {
+	case "added":
+		if err := execSQLTx(ctx, tx, "insert_file.sql", fc.FolderID, fc.Name, fc.DiskSize, fc.CreatedTime); err != nil {
+			return fmt.Errorf("failed to insert file %s: %w", fc.Name, err)
+		}
+	case "modified":
+		if err := execSQLTx(ctx, tx, "update_file.sql", fc.DiskSize, fc.CreatedTime, fc.FileID); err != nil {
+			return fmt.Errorf("failed to update file %s: %w", fc.Name, err)
+		}
+	case "removed":
+		if err := execSQLTx(ctx, tx, "delete_file.sql", fc.FileID); err != nil {
 			return fmt.Errorf("failed to delete file %s: %w", fc.Name, err)
 		}
 	default:

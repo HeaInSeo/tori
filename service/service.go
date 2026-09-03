@@ -22,7 +22,7 @@ var logger = globallog.Log
 type DataBlockService interface {
 	GetDataBlock(ctx context.Context, updateAt *timestamppb.Timestamp) (*pb.DataBlock, error)
 	SaveFolders(ctx context.Context) error
-	SyncFolders(ctx context.Context) (bool, error)
+	SyncFolders(ctx context.Context) (dbUtils.SyncResult, error)
 }
 
 // DataBlockCliService encapsulates core folder/database operations without owning a transport.
@@ -80,7 +80,7 @@ func (s *DataBlockCliService) SaveFolders(ctx context.Context) error {
 	return err
 }
 
-func (s *DataBlockCliService) SyncFolders(ctx context.Context) (bool, error) {
+func (s *DataBlockCliService) SyncFolders(ctx context.Context) (dbUtils.SyncResult, error) {
 	// 디렉터리 경로와 파일 제외 패턴을 넘겨서 dbUtils 쪽으로 위임
 	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions)
 }

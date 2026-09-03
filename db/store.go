@@ -25,18 +25,42 @@ func SaveFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		}
 	}
 
+	// 초기 스냅샷을 즉시 source-continuity witness 로 보호한다 (부트스트랩 시에만 생성).
+	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
+		return fmt.Errorf("failed to establish source witness: %w", err)
+	}
+
 	return nil
 }
 
-// UpdateDB 폴더 변경 내역과 파일 변경 내역을 DB에 반영
-func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []FileChange) error {
+// UpdateDB 폴더 변경 내역과 파일 변경 내역을 DB에 반영.
+// IMPORTANT: 전체 변경(폴더 upsert + 파일 add/modify/remove)을 단일 트랜잭션으로 적용한다.
+// 다중 행 적용 도중 실패하면 전부 롤백되므로, 부분 변형(partial mutation)이 수용된 스냅샷으로
+// 남을 수 없다 (TDI-I10). 트랜잭션 커밋 전까지는 어떤 accepted 상태 변형도 발생하지 않는다.
+func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []FileChange) (err error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Warnf("rollback failed: %v", rbErr)
+		}
+	}()
+
 	// 폴더 변경 업데이트
-	if err := UpsertFolders(ctx, db, diffs); err != nil {
-		return err
+	for i := range diffs {
+		if uErr := diffs[i].UpsertFolderTx(ctx, tx); uErr != nil {
+			return uErr
+		}
 	}
 	// UpsertFolders 해줘야지만, db 에 folderId 가 생겨서 검색할 수 가 있음.
 	// removed 파일은 Path == "" 이고 FolderID 가 이미 DB 에서 채워져 있으므로 건너뜀.
-	// 같은 폴더에 속한 파일이 여럿일 때 getFolderID 쿼리가 중복 실행되지 않도록 캐싱.
+	// 같은 폴더에 속한 파일이 여럿일 때 getFolderIDTx 쿼리가 중복 실행되지 않도록 캐싱.
 	folderIDCache := make(map[string]int64)
 	for i := range changes {
 		if changes[i].ChangeType == "removed" {
@@ -46,17 +70,24 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 			changes[i].FolderID = id
 			continue
 		}
-		folderId, err := getFolderID(db, changes[i].Path)
-		if err != nil {
-			return fmt.Errorf("failed to get folder ID for path %q: %w", changes[i].Path, err)
+		folderId, gErr := getFolderIDTx(ctx, tx, changes[i].Path)
+		if gErr != nil {
+			return fmt.Errorf("failed to get folder ID for path %q: %w", changes[i].Path, gErr)
 		}
 		folderIDCache[changes[i].Path] = folderId
 		changes[i].FolderID = folderId
 	}
 	// 파일 변경 업데이트,
-	if err := UpsertDelFiles(ctx, db, changes); err != nil {
-		return err
+	for i := range changes {
+		if uErr := changes[i].UpsertDelFileTx(ctx, tx); uErr != nil {
+			return uErr
+		}
 	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	committed = true
 	return nil
 }
 
@@ -186,22 +217,14 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 	return nil
 }
 
-func getFolderID(db *sql.DB, path string) (int64, error) {
-	rows, err := querySQLNoCtx(db, "get_folder_id.sql", path)
+// getFolderIDTx 는 진행 중인 tx 내에서 folder id 를 조회한다.
+func getFolderIDTx(ctx context.Context, tx *sql.Tx, path string) (int64, error) {
+	query, err := loadSQL("get_folder_id.sql")
 	if err != nil {
-		return 0, fmt.Errorf("querySQLNoCtx failed (get_folder_id.sql): %w", err)
-	}
-	defer func() {
-		if cErr := rows.Close(); cErr != nil {
-			logger.Warnf("failed to close rows: %v", cErr)
-		}
-	}()
-
-	if !rows.Next() {
-		return 0, sql.ErrNoRows
+		return 0, err
 	}
 	var id int64
-	if err := rows.Scan(&id); err != nil {
+	if err := tx.QueryRowContext(ctx, query, path).Scan(&id); err != nil {
 		return 0, fmt.Errorf("failed to scan folder id: %w", err)
 	}
 	return id, nil

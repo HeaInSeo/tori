@@ -18,3 +18,8 @@ CREATE TABLE IF NOT EXISTS files (
 
 CREATE INDEX IF NOT EXISTS idx_files_folder_id ON files(folder_id);
 
+CREATE TABLE IF NOT EXISTS snapshot_meta (
+                                     key TEXT PRIMARY KEY,
+                                     value TEXT NOT NULL
+);
+
