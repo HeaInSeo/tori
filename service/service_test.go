@@ -204,12 +204,12 @@ func TestSaveFoldersAndSyncFoldersGenerateDataBlock(t *testing.T) {
 		t.Fatalf("SaveFolders error: %v", err)
 	}
 
-	updated, err := svc.SyncFolders(ctx)
+	res, err := svc.SyncFolders(ctx)
 	if err != nil {
 		t.Fatalf("SyncFolders error: %v", err)
 	}
-	if !updated {
-		t.Fatalf("expected SyncFolders to report updated=true on first generation")
+	if res.Outcome != d.OutcomeAcceptedUpdate {
+		t.Fatalf("expected SyncFolders to report accepted-update on first generation, got %v", res.Outcome)
 	}
 
 	dataBlockPath := filepath.Join(rootDir, "datablock.pb")

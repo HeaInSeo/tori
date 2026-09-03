@@ -139,13 +139,21 @@ func syncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "스냅샷과 실제 폴더 비교 및 동기화",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			updated, err := appSvc.SyncFolders(cmd.Context())
+			res, err := appSvc.SyncFolders(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("동기화 실패: %w", err)
 			}
-			if updated {
-				logger.Info("폴더 변경 사항 반영 및 DataBlock 재생성 완료")
-			} else {
+			switch res.Outcome {
+			case dbUtils.OutcomeAcceptedUpdate:
+				if res.Reconcile {
+					logger.Info("불완전 수용 감지 → 프로젝션 재생성(reconcile) 후 수용 완료")
+				} else {
+					logger.Info("폴더 변경 사항 반영 및 DataBlock 재생성 완료 (accepted)")
+				}
+			case dbUtils.OutcomeDegradedHold:
+				logger.Warnf("degraded HOLD: scope=%s coverage=%s: %s (이전 스냅샷 유지, 변형 없음)",
+					res.Scope, res.Coverage, res.Reason)
+			default:
 				logger.Info("변경 사항 없음 – 동기화 생략")
 			}
 			return nil
