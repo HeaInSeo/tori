@@ -926,3 +926,35 @@ func TestI10_T06_RemoveLastFolderConvergesNotWedged(t *testing.T) {
 		t.Fatalf("state not clean after settle: %q", st)
 	}
 }
+
+// I1-T11: legacy DB (no recorded witness) synced against a DIFFERENT, empty root
+// while the original accepted paths still exist elsewhere → HOLD, not adopted.
+// Guards the containment check in firstMissingAcceptedFolder.
+func TestI1_T11_LegacyDBDifferentRootHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	foldersBefore := countFolders(t, db)
+	simulateLegacyDB(t, db, root)
+
+	// A different, empty but readable root; the original root (and its folders)
+	// still exists on disk, so a naive "does the accepted path exist anywhere"
+	// check would wrongly adopt this mount.
+	otherRoot := t.TempDir()
+	res, err := SyncFolders(ctx, db, otherRoot, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders should HOLD, not error: %v", err)
+	}
+	if res.Outcome != OutcomeDegradedHold || res.Scope != ScopeUnknown {
+		t.Fatalf("expected degraded-hold/UNKNOWN, got %v/%v (%s)", res.Outcome, res.Scope, res.Reason)
+	}
+	if got := countFolders(t, db); got != foldersBefore || foldersBefore == 0 {
+		t.Fatalf("inventory altered by different-root adoption: %d -> %d", foldersBefore, got)
+	}
+	if recordedWitnessForTest(t, db) != "" {
+		t.Fatalf("different root was adopted (witness backfilled) — must not happen")
+	}
+}

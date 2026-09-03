@@ -345,7 +345,7 @@ func observe(ctx context.Context, db *sql.DB, rootPath string, foldersExclusions
 			// accepted folder (plausibly the same source, not a wrong/empty mount). If
 			// any accepted folder is absent we cannot prove continuity → HOLD; the
 			// witness is NOT backfilled here, so a wrong mount is never adopted.
-			missing, mErr := firstMissingAcceptedFolder(db)
+			missing, mErr := firstMissingAcceptedFolder(db, rootPath)
 			if mErr != nil {
 				return SyncResult{}, mErr
 			}
@@ -412,22 +412,37 @@ func acceptedInventoryEmpty(db *sql.DB) (bool, error) {
 }
 
 // firstMissingAcceptedFolder returns the path of the first accepted folder that is
-// no longer present as a directory on disk, or "" when every accepted folder is
-// present. It is the source-continuity check used for legacy adoption when no
-// witness has been recorded yet: an empty/wrong mount will be missing the accepted
-// folders and must therefore be refused rather than adopted.
-func firstMissingAcceptedFolder(db *sql.DB) (string, error) {
+// not present as a directory UNDER rootPath, or "" when every accepted folder is
+// present under it. It is the source-continuity check used for legacy adoption when
+// no witness has been recorded yet: an empty/wrong mount (or a different root that
+// merely happens to leave the old absolute paths readable elsewhere) will be missing
+// the accepted folders and must therefore be refused rather than adopted.
+func firstMissingAcceptedFolder(db *sql.DB, rootPath string) (string, error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return "", err
 	}
 	for _, f := range folders {
+		if !pathWithinRoot(f.Path, rootPath) {
+			return f.Path, nil
+		}
 		info, statErr := os.Stat(f.Path)
 		if statErr != nil || !info.IsDir() {
 			return f.Path, nil
 		}
 	}
 	return "", nil
+}
+
+// pathWithinRoot reports whether p is root itself or lies inside root, guarding the
+// legacy-adoption continuity check against accepted paths that resolve outside the
+// currently observed source root.
+func pathWithinRoot(p, root string) bool {
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
 
 // buildFolderFilesFromDB reconstructs the [folderPath, name...] projection input
