@@ -103,15 +103,30 @@ any witness bootstrap and is out of scope. An interrupted bootstrap that already
 wrote a marker file is handled: restart *adopts* the single existing marker rather
 than writing a second one.
 
+## Determinism
+
+The projection is rebuilt from the accepted DB in a deterministic order — folders
+sorted by path, file names sorted ascending — so identical accepted inventory always
+projects to the same FileBlock/row ordering regardless of DB row order or the history
+by which the snapshot was reached (same data + same method = same result). The
+`DataBlock.UpdatedAt` timestamp is the only intentionally non-deterministic field.
+
 ## Known limitation — reconcile vs. projection inputs
 
 `reconcileIfPending` rebuilds the projection from the accepted DB. A folder that
-*vanished* from disk during the pending window is skipped (reconcile stays
-convergent, and the normal diff then prunes it). However, a folder that is still
-present but whose `rule.json` was removed or corrupted during that window makes
-projection generation hard-error, so reconcile cannot complete until the file is
-restored — blocking sync for all folders. Degrading such a folder to a surfaced
-skip is a follow-up in the `rules`/`block` layer.
+*vanished* from disk during the pending window is skipped, and reconcile then reports
+the rebuild as **incomplete** and does **not** mark the snapshot clean: it stays
+`pending` so the normal diff/accept path in the same run prunes the folder and commits
+a consistent, clean projection. Reconcile never declares clean while the projection
+omits an accepted DB row, and never mutates the accepted DB itself.
+
+A DB state that cannot be projected at all — a folder still present but whose
+`rule.json` was removed/corrupted, or accepted rows that violate the rule contract
+(e.g. a duplicate-role collision) — still makes projection generation hard-error, so
+acceptance stays `pending` until the source is corrected. This is fail-closed
+(recoverable, not data loss) but it does block sync; degrading such an input to a
+surfaced per-folder skip is a follow-up owned by the `rules`/`block` projection layer,
+outside this boundary's `db` surface.
 
 Separately, if a crash left `pending` and the source is subsequently classified
 UNKNOWN/PARTIAL, `SyncFolders` HOLDs at observation *before* reconciling, so the DB

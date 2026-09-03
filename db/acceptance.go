@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -455,44 +456,58 @@ func pathWithinRoot(p, root string) bool {
 // reconcile into a permanent pending state. Skipping keeps reconcile convergent;
 // the removal is then applied authoritatively by the normal diff path in the same
 // SyncFolders call (which prunes the DB row and rebuilds a consistent projection).
-func buildFolderFilesFromDB(db *sql.DB) ([][]string, error) {
+// It reports complete=false when any folder had to be skipped, so callers do not
+// declare a snapshot clean while the projection omits an accepted DB row.
+//
+// Folders and their file names are emitted in a deterministic sorted order so the
+// same accepted inventory always projects to the same FileBlock/row ordering,
+// regardless of DB row order or the history by which the snapshot was reached
+// (reproducibility: same data + same method = same result).
+func buildFolderFilesFromDB(db *sql.DB) (folderFiles [][]string, complete bool, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	folderFiles := make([][]string, 0, len(folders))
+	sort.Slice(folders, func(i, j int) bool { return folders[i].Path < folders[j].Path })
+	folderFiles = make([][]string, 0, len(folders))
+	complete = true
 	for _, folder := range folders {
 		if info, statErr := os.Stat(folder.Path); statErr != nil || !info.IsDir() {
 			logger.Warnf("reconcile: skipping folder no longer present on disk: %s", folder.Path)
+			complete = false
 			continue
 		}
-		files, err := GetFilesByPathFromDB(db, folder.Path)
-		if err != nil {
-			return nil, err
+		files, fErr := GetFilesByPathFromDB(db, folder.Path)
+		if fErr != nil {
+			return nil, false, fErr
 		}
-		row := append([]string{folder.Path}, ExtractFileNames(files)...)
+		names := ExtractFileNames(files)
+		sort.Strings(names)
+		row := append([]string{folder.Path}, names...)
 		folderFiles = append(folderFiles, row)
 	}
-	return folderFiles, nil
+	return folderFiles, complete, nil
 }
 
 // regenerateProjectionFromDB rebuilds FileBlocks + datablock.pb from the accepted
 // DB rows. It is the single projection-completion path used by both first-time
-// acceptance and crash-recovery reconcile, which keeps the two idempotent.
-func regenerateProjectionFromDB(db *sql.DB, rootPath string) error {
-	folderFiles, err := buildFolderFilesFromDB(db)
+// acceptance and crash-recovery reconcile, which keeps the two idempotent. It
+// returns complete=false when the projection had to omit an accepted folder that
+// is no longer present on disk.
+func regenerateProjectionFromDB(db *sql.DB, rootPath string) (bool, error) {
+	folderFiles, complete, err := buildFolderFilesFromDB(db)
 	if err != nil {
-		return err
+		return false, err
 	}
 	fbs, err := block.GenerateFBs(folderFiles)
 	if err != nil {
-		return fmt.Errorf("failed to generate FileBlocks from accepted DB: %w", err)
+		return false, fmt.Errorf("failed to generate FileBlocks from accepted DB: %w", err)
 	}
 	outputDatablock := filepath.Join(rootPath, "datablock.pb")
 	if err := block.GenerateDataBlock(fbs, outputDatablock); err != nil {
-		return fmt.Errorf("failed to generate DataBlock (%s): %w", outputDatablock, err)
+		return false, fmt.Errorf("failed to generate DataBlock (%s): %w", outputDatablock, err)
 	}
-	return nil
+	return complete, nil
 }
 
 // beginPending durably records that an acceptance is in progress and bumps the
@@ -546,13 +561,24 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool,
 	if state != acceptancePending {
 		return false, nil
 	}
-	if err := regenerateProjectionFromDB(db, rootPath); err != nil {
+	complete, err := regenerateProjectionFromDB(db, rootPath)
+	if err != nil {
 		return false, err
 	}
 	// A bootstrap crash may have left no recorded witness; establish it now so the
 	// recovered snapshot is continuity-provable going forward.
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
 		return false, err
+	}
+	if !complete {
+		// The projection could not include every accepted folder (one vanished from
+		// disk during the pending window). Do NOT declare the snapshot clean while the
+		// projection omits an accepted DB row: leave it pending and let the normal
+		// diff/accept path in this same SyncFolders run prune the vanished folder and
+		// commit a consistent, clean projection. Returning false stops SyncFolders from
+		// short-circuiting to "unchanged".
+		logger.Warn("reconcile: projection omitted a vanished accepted folder; deferring clean to the diff/accept path")
+		return false, nil
 	}
 	target, err := metaGetInt(ctx, db, metaKeyTargetVersion)
 	if err != nil {
@@ -578,7 +604,10 @@ func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []Folder
 			return err
 		}
 	}
-	if err := regenerateProjectionFromDB(db, rootPath); err != nil {
+	// acceptWork projects the accepted DB it just wrote to match the confirmed source,
+	// so the rebuild is expected to be complete; the completeness flag is consumed by
+	// the reconcile path (not here), where a vanished folder must defer the clean mark.
+	if _, err := regenerateProjectionFromDB(db, rootPath); err != nil {
 		return err
 	}
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {

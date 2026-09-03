@@ -958,3 +958,88 @@ func TestI1_T11_LegacyDBDifferentRootHolds(t *testing.T) {
 		t.Fatalf("different root was adopted (witness backfilled) — must not happen")
 	}
 }
+
+// --- reconcile/projection correctness (codex P1 fixes) -------------------------
+
+// Reconcile must NOT declare a snapshot clean while the rebuilt projection omits an
+// accepted folder that vanished during the pending window. It leaves the state
+// pending so the diff/accept path prunes the folder and commits a consistent clean
+// projection; reconcile itself must not mutate the accepted DB.
+func TestReconcile_IncompleteRebuildDefersClean(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "set_a", pairFiles("s1")...)
+	writeRuleFolder(t, root, "set_b", pairFiles("s2")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	if _, err := beginPending(ctx, db); err != nil {
+		t.Fatalf("beginPending: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "set_b")); err != nil {
+		t.Fatalf("remove set_b: %v", err)
+	}
+
+	reconciled, err := reconcileIfPending(ctx, db, root)
+	if err != nil {
+		t.Fatalf("reconcileIfPending: %v", err)
+	}
+	if reconciled {
+		t.Fatalf("reconcile reported clean while omitting an accepted folder")
+	}
+	if st := acceptanceStateForTest(t, db); st != acceptancePending {
+		t.Fatalf("reconcile falsely left state %q; want still pending", st)
+	}
+	if !folderExistsInDB(t, db, "set_b") {
+		t.Fatalf("reconcile must not prune DB rows; that is the diff/accept path's job")
+	}
+
+	// The full SyncFolders run resolves it authoritatively and converges to clean.
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("want accepted-update, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if st := acceptanceStateForTest(t, db); st != acceptanceClean {
+		t.Fatalf("not clean after resolve: %q", st)
+	}
+	if folderExistsInDB(t, db, "set_b") {
+		t.Fatalf("vanished folder not pruned after resolve")
+	}
+}
+
+// The projection rebuilt from the accepted DB must be deterministically ordered
+// (folders by path, file names ascending) so identical accepted inventory yields an
+// identical projection ordering regardless of DB row order or acceptance history.
+func TestReconcile_ProjectionOrderingDeterministic(t *testing.T) {
+	root := t.TempDir()
+	// Names chosen so on-disk/enumeration order differs from sorted order.
+	writeRuleFolder(t, root, "zeta", pairFiles("s2")...)
+	writeRuleFolder(t, root, "alpha", pairFiles("s1")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	rows, complete, err := buildFolderFilesFromDB(db)
+	if err != nil {
+		t.Fatalf("buildFolderFilesFromDB: %v", err)
+	}
+	if !complete {
+		t.Fatalf("expected a complete rebuild")
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 folders, got %d", len(rows))
+	}
+	if filepath.Base(rows[0][0]) != "alpha" || filepath.Base(rows[1][0]) != "zeta" {
+		t.Fatalf("folders not sorted by path: %q then %q", rows[0][0], rows[1][0])
+	}
+	for _, row := range rows {
+		names := row[1:]
+		for i := 1; i < len(names); i++ {
+			if names[i-1] > names[i] {
+				t.Fatalf("file names not sorted in %s: %v", row[0], names)
+			}
+		}
+	}
+}
