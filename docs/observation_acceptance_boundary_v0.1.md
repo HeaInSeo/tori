@@ -72,8 +72,16 @@ scope CONFIRMED + COMPLETE
 ## Status surface
 
 `SyncFolders` returns a `SyncResult` distinguishing `unchanged` /
-`accepted-update` (including a reconcile) / `degraded-hold`, plus the observed
-`Scope`/`Coverage` and a reason. The `sync` CLI reports all three.
+`accepted-update` (including a reconcile) / `degraded-hold` / `reclassify-hold`, plus
+the observed `Scope`/`Coverage` and a reason. The `sync` CLI reports all four.
+
+`reclassify-hold` (added by TDI-I4F) is a classification-semantics HOLD, deliberately
+distinct from both `unchanged` and `degraded-hold`. It fires when an accepted folder's
+on-disk `rule.json` has drifted from the frozen classification-semantics basis it was
+accepted under, or when that frozen basis cannot be recovered/verified. The accepted
+snapshot (DB + projection) is retained; the drifted rule is neither adopted nor used,
+and resolving it requires the later reclassification/publication lane (not this
+boundary).
 
 ## Explicit non-claims (out of scope)
 
@@ -120,13 +128,16 @@ the rebuild as **incomplete** and does **not** mark the snapshot clean: it stays
 a consistent, clean projection. Reconcile never declares clean while the projection
 omits an accepted DB row, and never mutates the accepted DB itself.
 
-A DB state that cannot be projected at all — a folder still present but whose
-`rule.json` was removed/corrupted, or accepted rows that violate the rule contract
-(e.g. a duplicate-role collision) — still makes projection generation hard-error, so
-acceptance stays `pending` until the source is corrected. This is fail-closed
-(recoverable, not data loss) but it does block sync; degrading such an input to a
-surfaced per-folder skip is a follow-up owned by the `rules`/`block` projection layer,
-outside this boundary's `db` surface.
+Since **TDI-I4F**, projection is rebuilt from the **frozen per-folder classification
+basis** pinned at acceptance (target basis while `pending`, accepted basis while
+`clean`), never by re-reading the mutable on-disk `rule.json`. Consequently a later
+removed/corrupted `rule.json` can no longer silently reinterpret — or hard-error — the
+accepted projection: the accepted snapshot is rebuilt from its frozen basis. A folder
+whose *frozen* basis is missing/unverifiable is surfaced fail-closed as a
+`reclassify-hold` (not a hard error), and a `rule.json` that has drifted from the frozen
+basis is a `reclassify-hold` too — in both cases the accepted DB + projection are
+retained and reclassification is required. (Accepted rows that violate the rule contract
+at *acceptance* time are still rejected by the rule preflight before the DB advances.)
 
 Separately, if a crash left `pending` and the source is subsequently classified
 UNKNOWN/PARTIAL, `SyncFolders` HOLDs at observation *before* reconciling, so the DB

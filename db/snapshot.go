@@ -147,15 +147,23 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer, frozen); dErr != nil {
 		return SyncResult{}, dErr
 	} else if driftFolder != "" {
-		outputDatablock := filepath.Join(rootPath, "datablock.pb")
-		if _, statErr := os.Stat(outputDatablock); os.IsNotExist(statErr) {
-			if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope); rErr != nil {
-				return SyncResult{}, rErr
-			}
-		}
 		res.Outcome = OutcomeReclassifyHold
-		res.Reason = fmt.Sprintf("classification-semantics drift on %s (%s → %s): reclassification required; accepted R1 retained",
-			driftFolder, shortRev(fromRev), shortRev(toRev))
+		if fromRev == "" {
+			// Unverifiable basis: the folder has no recoverable accepted basis, so the
+			// projection cannot be safely rebuilt — HOLD without touching it.
+			res.Reason = fmt.Sprintf("accepted folder %s has no recoverable classification basis (unverifiable); reclassification required", driftFolder)
+		} else {
+			// Genuine R1->R2 drift: the accepted R1 basis exists, so if the projection is
+			// missing, restore it from that frozen basis (never on-disk R2) before holding.
+			outputDatablock := filepath.Join(rootPath, "datablock.pb")
+			if _, statErr := os.Stat(outputDatablock); os.IsNotExist(statErr) {
+				if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope); rErr != nil {
+					return SyncResult{}, rErr
+				}
+			}
+			res.Reason = fmt.Sprintf("classification-semantics drift on %s (%s → %s): reclassification required; accepted R1 retained",
+				driftFolder, shortRev(fromRev), shortRev(toRev))
+		}
 		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
 		return res, nil
 	}

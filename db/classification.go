@@ -236,6 +236,19 @@ func basesSlice(frozen map[string]folderBasis, paths []string) []folderBasis {
 // folder is pruned by the diff path, and an unreadable rule leaves the pinned accepted
 // basis authoritative for projection.
 func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, frozen map[string]folderBasis) (driftFolder, from, to string, err error) {
+	// Drift is defined relative to a pinned accepted basis. Skip only when NO basis is
+	// pinned at acceptedVer — a true bootstrap or SaveFolders-seeded rows awaiting their
+	// first accept, where the normal accept path will freeze and pin the basis. Do NOT key
+	// this on acceptedVer==0: accepted_version is advanced only by commitClean, so a legacy
+	// pre-I4F snapshot that migrateLegacyBasisIfNeeded adopts sits at version 0 yet HAS a
+	// pinned basis at v0 that must still be checked for drift.
+	pinnedAtVer, err := countSemanticsAtVersion(ctx, db, acceptedVer)
+	if err != nil {
+		return "", "", "", err
+	}
+	if pinnedAtVer == 0 {
+		return "", "", "", nil
+	}
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return "", "", "", err
@@ -250,7 +263,16 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, fr
 			return "", "", "", gErr
 		}
 		if !ok {
-			continue
+			// An IN-SCOPE accepted folder with no pinned accepted basis is a blind spot:
+			// migration has already run (pinnedCount>0) so it will not adopt it, and a
+			// later data update would otherwise pin whatever rule is on disk, silently
+			// reinterpreting the legacy inventory. This can arise if a prior scoped
+			// migration/accept committed only a subset and the folder was excluded then
+			// re-included before pruning. Fail closed: surface it as an unverifiable-basis
+			// reclassification HOLD (from == "" marks "no recoverable basis") rather than
+			// skipping it. (Out-of-scope folders are absent from `frozen` and skipped
+			// above; they are pruned by the diff path.)
+			return f.Path, "", cand.RevisionID, nil
 		}
 		if cand.RevisionID != pinned.RevisionID {
 			return f.Path, pinned.RevisionID, cand.RevisionID, nil

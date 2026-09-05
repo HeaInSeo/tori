@@ -541,6 +541,87 @@ func TestI4F_MigrationIgnoresExcludedFolder(t *testing.T) {
 	}
 }
 
+// TestI4F_InScopeBasisLessFolderHolds (adversarial regression, round 4): an in-scope
+// accepted folder that has no pinned accepted basis (e.g. a prior scoped migration/accept
+// left it basis-less and it is now back in scope) must fail closed as a reclassify-hold,
+// not be silently skipped by drift detection (which would let a later update pin an
+// arbitrary rule for it).
+func TestI4F_InScopeBasisLessFolderHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	// Drop ONLY b's pinned basis, leaving b in the DB and in scope (no exclusion).
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics WHERE folder_path = ?", dirB); err != nil {
+		t.Fatalf("drop b basis: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold for an in-scope basis-less folder, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if _, ok := acceptedBasis(t, ctx, db, acceptedVer, dirB); ok {
+		t.Fatal("basis-less folder was silently re-pinned instead of held")
+	}
+}
+
+// TestI4F_LegacyMigrationAtV0DriftHolds (adversarial regression, round 4/P0): a pre-I1/I10
+// snapshot never ran commitClean, so accepted_version stays 0 even though a real accepted
+// projection (datablock.pb + rows) exists. migrateLegacyBasisIfNeeded adopts and pins a
+// basis at version 0. A subsequent rule.json drift on that folder MUST still be detected
+// and HOLD — detectSemanticsDrift must key on "a basis is pinned at acceptedVer", not on
+// acceptedVer==0 (which would silently skip drift for exactly these legacy snapshots and
+// reinterpret the accepted inventory under the drifted rule).
+func TestI4F_LegacyMigrationAtV0DriftHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root) // v1, basis pinned, datablock present
+
+	// Simulate a pre-I1/I10 legacy snapshot: accepted rows + datablock present, but no
+	// pinned basis and accepted_version/target_version never advanced past 0.
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	if err := metaSet(ctx, db, metaKeyAcceptedVersion, "0"); err != nil {
+		t.Fatalf("reset accepted_version: %v", err)
+	}
+	if err := metaSet(ctx, db, metaKeyTargetVersion, "0"); err != nil {
+		t.Fatalf("reset target_version: %v", err)
+	}
+
+	// First sync: migration adopts current (R1) rules as the basis, pinned at v0.
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders (adopt): %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("legacy migration wrongly HELD despite reproducing projection: %s", res.Reason)
+	}
+	if _, ok := acceptedBasis(t, ctx, db, 0, dir); !ok {
+		t.Fatal("migration did not pin a basis at v0")
+	}
+
+	// The on-disk rule now drifts R1->R2. This must be a reclassify-hold even though
+	// accepted_version is still 0 (the exact hole the acceptedVer==0 guard would reopen).
+	setRule(t, dir, ruleJSONR2)
+	res, err = SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders (drift): %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold on rule drift over a v0 migration basis, got %v (%s)", res.Outcome, res.Reason)
+	}
+}
+
 // TestI4F_UncoveredDiffFolderGuard (adversarial regression, round 3): the freeze→diff
 // TOCTOU guard flags an added/modified folder whose basis was not frozen (it appeared
 // after the freeze) and exempts removals and covered folders.
