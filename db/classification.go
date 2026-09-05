@@ -487,7 +487,15 @@ func candidateReproducesAcceptedProjection(rootPath string, expected map[string]
 	}
 	storedBlocks := make(map[string]*pb.FileBlock, len(stored.GetBlocks()))
 	for _, b := range stored.GetBlocks() {
-		storedBlocks[b.GetBlockId()] = b
+		id := b.GetBlockId()
+		if _, dup := storedBlocks[id]; dup {
+			// Duplicate block ids mean the stored projection is not a clean 1:1 reflection of
+			// the accepted DB; collapsing them in the map would let the last one pass the
+			// content check while a stale/duplicate block stays published. Reproduction is
+			// not exact → refuse to adopt.
+			return false, fmt.Sprintf("accepted projection has a duplicate block id %s", id)
+		}
+		storedBlocks[id] = b
 	}
 	// Subset match: every in-scope (expected) folder's regenerated block must match the
 	// stored accepted block.

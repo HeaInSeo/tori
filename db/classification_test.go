@@ -1005,3 +1005,48 @@ func TestI4F_MigrationRejectsPhantomBlock(t *testing.T) {
 		t.Fatal("migration adopted a basis despite an unreproducible (phantom-block) projection")
 	}
 }
+
+// TestI4F_MigrationRejectsDuplicateBlockID (adversarial regression, round 8): a legacy
+// datablock.pb containing two blocks with the same accepted block id must fail reproduction
+// (the map would otherwise collapse them, letting the last matching one pass while a stale
+// duplicate stays published). Migration must HOLD, not adopt.
+func TestI4F_MigrationRejectsDuplicateBlockID(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM snapshot_meta WHERE key = ?", metaKeyAcceptanceProvenance); err != nil {
+		t.Fatalf("clear provenance: %v", err)
+	}
+	dbPath := filepath.Join(root, "datablock.pb")
+	dbk, err := protoio.LoadDataBlock(dbPath)
+	if err != nil {
+		t.Fatalf("load datablock: %v", err)
+	}
+	// Duplicate f1's block (same block id) so the stored projection is not 1:1 with the DB.
+	blocks := dbk.GetBlocks()
+	if len(blocks) == 0 {
+		t.Fatal("expected at least one stored block")
+	}
+	dbk.Blocks = append(dbk.GetBlocks(), blocks[0])
+	if err := protoio.SaveMessage(dbPath, dbk, 0o600); err != nil {
+		t.Fatalf("save datablock: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold for a datablock with a duplicate block id, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if _, ok := acceptedBasis(t, ctx, db, acceptedVer, dir); ok {
+		t.Fatal("migration adopted a basis despite a duplicate-block (non-exact) projection")
+	}
+}

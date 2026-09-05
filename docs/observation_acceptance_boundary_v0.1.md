@@ -72,8 +72,16 @@ scope CONFIRMED + COMPLETE
 ## Status surface
 
 `SyncFolders` returns a `SyncResult` distinguishing `unchanged` /
-`accepted-update` (including a reconcile) / `degraded-hold` / `reclassify-hold`, plus
-the observed `Scope`/`Coverage` and a reason. The `sync` CLI reports all four.
+`accepted-update` (including a reconcile) / `degraded-hold` / `reclassify-hold` /
+`incomplete-pending`, plus the observed `Scope`/`Coverage` and a reason. The `sync` CLI
+reports all five.
+
+`incomplete-pending` means the DB mutation WAS applied but the projection could not be
+completed in the same run (a folder vanished/left scope between the diff and the projection
+rebuild), so the snapshot is left pending for the next sync to reconcile/prune. It is
+deliberately distinct from `degraded-hold`, whose contract is "no mutation occurred, the
+previous snapshot is retained intact" — here a mutation did occur and the projection is
+intentionally incomplete until convergence.
 
 `reclassify-hold` (added by TDI-I4F) is a classification-semantics HOLD, deliberately
 distinct from both `unchanged` and `degraded-hold`. It fires when an accepted folder's

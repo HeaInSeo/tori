@@ -141,6 +141,15 @@ const (
 	// Resolving it requires the later reclassification/publication path, which I4F does
 	// not implement.
 	OutcomeReclassifyHold
+	// OutcomeIncompletePending means a confirmed observation WAS applied to the accepted DB
+	// (a mutation occurred) but the projection could not be completed in the same run — a
+	// folder vanished or left scope between the diff and the projection rebuild — so the
+	// snapshot is left PENDING for the next sync to reconcile/prune and converge. It is
+	// deliberately DISTINCT from OutcomeAcceptedUpdate (the snapshot is not clean) and from
+	// OutcomeDegradedHold (which means NO mutation occurred and the previous snapshot was
+	// retained intact): here the DB advanced and the projection is intentionally incomplete
+	// until the next run. Callers must not report it as either "accepted" or "no mutation".
+	OutcomeIncompletePending
 )
 
 func (o SyncOutcome) String() string {
@@ -151,6 +160,8 @@ func (o SyncOutcome) String() string {
 		return "degraded-hold"
 	case OutcomeReclassifyHold:
 		return "reclassify-hold"
+	case OutcomeIncompletePending:
+		return "incomplete-pending"
 	default:
 		return "unchanged"
 	}

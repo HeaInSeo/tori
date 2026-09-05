@@ -159,6 +159,12 @@ func syncCmd() *cobra.Command {
 				// into "변경 사항 없음". The accepted snapshot is retained; reclassification
 				// is required and is owned by a later publication/reclassification path.
 				logger.Warnf("reclassification-required HOLD: %s (이전 스냅샷 유지, 재분류 필요)", res.Reason)
+			case dbUtils.OutcomeIncompletePending:
+				// TDI-I4F: the DB mutation was applied but the projection is incomplete (a
+				// folder vanished/left scope mid-accept); the snapshot is pending. Report it
+				// as mutated-but-incomplete — NOT "no mutation" (degraded) and NOT clean —
+				// so the next sync reconciles/prunes and converges.
+				logger.Warnf("incomplete acceptance: %s (DB 변형 적용됨, 프로젝션 미완료 → 다음 동기화에서 재조정)", res.Reason)
 			default:
 				logger.Info("변경 사항 없음 – 동기화 생략")
 			}

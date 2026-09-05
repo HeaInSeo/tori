@@ -250,15 +250,15 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return SyncResult{}, ctx.Err()
 	}
 	if !complete {
-		// A folder vanished/left scope between the freeze/diff and the projection rebuild, so
-		// acceptWork left the snapshot pending (DB advanced but projection omits an accepted
-		// row). Do NOT report an accepted update for an inconsistent, still-pending snapshot:
-		// surface a HOLD so the caller retries; the next sync reconciles/prunes and converges.
-		res.Outcome = OutcomeDegradedHold
-		res.Scope = ScopeConfirmed
-		res.Coverage = CoverageComplete
-		res.Reason = "accepted DB advanced but projection is incomplete (a folder vanished/left scope mid-accept); retry to converge"
-		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		// A folder vanished/left scope between the diff and the projection rebuild, so
+		// acceptWork applied the DB mutation but left the snapshot PENDING (projection omits
+		// an accepted row). Report OutcomeIncompletePending — NOT OutcomeAcceptedUpdate (the
+		// snapshot is not clean) and NOT OutcomeDegradedHold (which asserts no mutation and a
+		// retained prior snapshot, both false here). The next sync reconciles/prunes and
+		// converges.
+		res.Outcome = OutcomeIncompletePending
+		res.Reason = "accepted DB advanced but projection is incomplete (a folder vanished/left scope mid-accept); pending, retry to converge"
+		globallog.Log.Warnf("SyncFolders: %s", res.Reason)
 		return res, nil
 	}
 
