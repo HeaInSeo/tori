@@ -676,46 +676,75 @@ func readAcceptanceState(ctx context.Context, db *sql.DB) (state string, err err
 	return v, nil
 }
 
-// reconcileIfPending detects an incomplete prior acceptance and, if found, rebuilds
-// the projection from the accepted DB and marks the snapshot clean. It must run
-// before any "unchanged" can be returned. It is idempotent: rebuilding a projection
-// that is already correct simply rewrites identical inventory and converges.
-func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScope map[string]struct{}) (bool, error) {
+// beforePublishForTest and crashAfterPublishForTest are test-only fault-injection seams for
+// publishAcceptedProjection (nil in production). See their use sites in that function.
+var (
+	beforePublishForTest     func()
+	crashAfterPublishForTest func() bool
+)
+
+// publishAcceptedProjection is the single crash-safe accepted-projection publish/recovery
+// primitive shared by acceptWork, reconcile, and the missing-projection / drift restore
+// paths (TDI-I4F v0.3, central round-10). It guarantees, in order:
+//
+//  1. `pending` is durably recorded BEFORE datablock.pb is replaced. A crash between the
+//     publish and the clean transition is then recoverable: the pending marker forces a
+//     rebuild-before-clean on the next run, so an incomplete projection can never read as
+//     clean/unchanged and hide an accepted folder.
+//  2. the projection is rebuilt ONLY from the frozen target/accepted basis (never the
+//     on-disk rule.json) — regenerateProjectionFromDB enforces this.
+//  3. complete=false is never discarded: if the rebuild had to omit an accepted folder (one
+//     vanished or fell out of scope) the snapshot stays pending and complete=false is
+//     returned so the caller surfaces an incomplete/pending outcome.
+//  4. clean/accepted is committed only after a COMPLETE rebuild, and only after any
+//     accepted-fallback basis is carried forward so the promoted accepted basis is complete.
+//
+// The caller owns any DB-row mutation + target-basis pinning (beginPending*) that must
+// precede the publish. Returns complete=true iff the snapshot was promoted to clean/accepted.
+func publishAcceptedProjection(ctx context.Context, db *sql.DB, rootPath string, inScope map[string]struct{}) (complete bool, err error) {
+	// (1) recovery truth durable BEFORE the projection is touched.
 	state, err := readAcceptanceState(ctx, db)
 	if err != nil {
 		return false, err
 	}
 	if state != acceptancePending {
-		return false, nil
+		if err := metaSet(ctx, db, metaKeyAcceptanceState, acceptancePending); err != nil {
+			return false, err
+		}
 	}
-	complete, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
-	if err != nil {
-		return false, err
-	}
-	// A bootstrap crash may have left no recorded witness; establish it now so the
-	// recovered snapshot is continuity-provable going forward.
+	// A bootstrap crash may have left no recorded witness; establish it now so the recovered
+	// snapshot is continuity-provable going forward (no-op when a witness already exists).
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
 		return false, err
 	}
+	// Test-only fault injection (nil in production): fires AFTER pending is durable but BEFORE
+	// the projection is published, so a test can assert the pending-before-publish ordering.
+	if beforePublishForTest != nil {
+		beforePublishForTest()
+	}
+	// (2)+(3) rebuild+publish from the frozen basis; keep the completeness signal.
+	complete, err = regenerateProjectionFromDB(ctx, db, rootPath, inScope)
+	if err != nil {
+		return false, err
+	}
 	if !complete {
-		// The projection could not include every accepted folder (one vanished from
-		// disk during the pending window). Do NOT declare the snapshot clean while the
-		// projection omits an accepted DB row: leave it pending and let the normal
-		// diff/accept path in this same SyncFolders run prune the vanished folder and
-		// commit a consistent, clean projection. Returning false stops SyncFolders from
-		// short-circuiting to "unchanged".
-		logger.Warn("reconcile: projection omitted a vanished accepted folder; deferring clean to the diff/accept path")
+		// Leave the snapshot pending; the caller surfaces incomplete/pending and the next
+		// sync reconciles/prunes and converges.
 		return false, nil
 	}
+	// Test-only fault injection (nil in production): simulate a process crash AFTER the
+	// projection is published but BEFORE the clean/accepted transition. Returns without
+	// committing clean, leaving the snapshot pending (recoverable on the next run).
+	if crashAfterPublishForTest != nil && crashAfterPublishForTest() {
+		return false, nil
+	}
+	// (4) complete → carry any accepted-fallback basis forward to the target version, then
+	// promote clean/accepted. carryForwardBasesToTarget is a no-op when target == accepted
+	// (restore paths) or when every folder is already pinned at target (acceptWork).
 	target, err := metaGetInt(ctx, db, metaKeyTargetVersion)
 	if err != nil {
 		return false, err
 	}
-	// Before promoting the target to accepted, carry any accepted-fallback basis forward to
-	// the target version. Reconcile may have projected a re-included folder from its accepted
-	// basis (the pending target omitted it); commitClean only flips the version pointer, so
-	// without this the folder would be basis-less at the new accepted version and wedge on a
-	// false reclassify-hold (TDI-I4F v0.3).
 	accepted, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
 	if err != nil {
 		return false, err
@@ -729,6 +758,22 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 	return true, nil
 }
 
+// reconcileIfPending detects an incomplete prior acceptance and, if found, rebuilds the
+// projection from the accepted DB and marks the snapshot clean via the shared crash-safe
+// publish primitive. It must run before any "unchanged" can be returned. It is idempotent:
+// rebuilding an already-correct projection rewrites identical inventory and converges.
+// Returns true only when the pending acceptance was completed (promoted to clean).
+func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScope map[string]struct{}) (bool, error) {
+	state, err := readAcceptanceState(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	if state != acceptancePending {
+		return false, nil
+	}
+	return publishAcceptedProjection(ctx, db, rootPath, inScope)
+}
+
 // acceptWork applies a confirmed+complete observation as a crash-recoverable unit:
 // pending marker + frozen target basis (one tx) → atomic DB mutation → projection
 // rebuild from the pinned target basis → clean marker (which atomically promotes the
@@ -737,8 +782,7 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 // projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
 // invalid rule HOLDs before any DB row advances (TDI-I4F §5).
 func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, inScope map[string]struct{}) (complete bool, err error) {
-	target, err := beginPendingWithBasis(ctx, db, targetBasis)
-	if err != nil {
+	if _, err = beginPendingWithBasis(ctx, db, targetBasis); err != nil {
 		return false, err
 	}
 	if len(diffs) > 0 || len(changes) > 0 {
@@ -748,23 +792,10 @@ func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []Folder
 			return false, err
 		}
 	}
-	// acceptWork projects the accepted DB it just wrote to match the confirmed source, so
-	// the rebuild is normally complete. If it is NOT — a folder vanished or fell out of
-	// scope between the freeze/diff and this projection — do NOT mark the target clean
-	// while the projection omits an accepted DB row (mirrors reconcile's defer): leave it
-	// pending so the next SyncFolders run reconciles/prunes and converges, rather than
-	// promoting a target whose projection is missing a folder. The caller must NOT report an
-	// accepted update for this incomplete outcome (it returns complete=false).
-	complete, err = regenerateProjectionFromDB(ctx, db, rootPath, inScope)
-	if err != nil {
-		return false, err
-	}
-	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
-		return false, err
-	}
-	if !complete {
-		logger.Warn("acceptWork: projection omitted an accepted folder; leaving pending for the next reconcile to converge")
-		return false, nil
-	}
-	return true, commitClean(ctx, db, target)
+	// Publish + promote via the shared crash-safe primitive: pending is already durable (from
+	// beginPendingWithBasis above, which also pinned the complete target basis), so this
+	// rebuilds from the frozen target basis and promotes to clean/accepted only on a COMPLETE
+	// rebuild; an incomplete rebuild (a folder vanished/left scope) stays pending and returns
+	// complete=false so the caller surfaces incomplete/pending rather than an accepted update.
+	return publishAcceptedProjection(ctx, db, rootPath, inScope)
 }

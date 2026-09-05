@@ -1098,3 +1098,135 @@ func TestI4F_ReconcileCarriesFallbackBasisForward(t *testing.T) {
 		t.Fatalf("expected unchanged after carry-forward, got %v (%s)", res2.Outcome, res2.Reason)
 	}
 }
+
+// TestI4F_RestoreMarksPendingBeforePublish (adversarial regression, round 10): the shared
+// publish primitive must record `pending` durably BEFORE it replaces datablock.pb, so a crash
+// mid-restore cannot leave an incomplete projection that reads as clean.
+func TestI4F_RestoreMarksPendingBeforePublish(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("remove datablock: %v", err)
+	}
+
+	var fired, sawPending, sawDatablockAbsent bool
+	beforePublishForTest = func() {
+		fired = true
+		st, _ := readAcceptanceState(ctx, db)
+		sawPending = st == acceptancePending
+		_, statErr := os.Stat(filepath.Join(root, "datablock.pb"))
+		sawDatablockAbsent = os.IsNotExist(statErr)
+	}
+	t.Cleanup(func() { beforePublishForTest = nil })
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	beforePublishForTest = nil
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if !fired {
+		t.Fatal("publish primitive was not exercised on the restore path")
+	}
+	if !sawPending {
+		t.Fatal("pending was not durable before the projection was published")
+	}
+	if !sawDatablockAbsent {
+		t.Fatal("datablock.pb was published before the pending marker was recorded")
+	}
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("restore should complete to accepted-update, got %v (%s)", res.Outcome, res.Reason)
+	}
+}
+
+// TestI4F_CrashAfterPublishBeforeCleanRecovers (adversarial regression, round 10): a crash
+// after the projection is published but before the clean transition must leave the snapshot
+// pending (never clean), and the next sync must recover to clean.
+func TestI4F_CrashAfterPublishBeforeCleanRecovers(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("remove datablock: %v", err)
+	}
+
+	crashAfterPublishForTest = func() bool { return true }
+	t.Cleanup(func() { crashAfterPublishForTest = nil })
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders (crash): %v", err)
+	}
+	if st, _ := readAcceptanceState(ctx, db); st != acceptancePending {
+		t.Fatalf("snapshot must be pending after a crash before clean, got %q", st)
+	}
+	if _, e := os.Stat(filepath.Join(root, "datablock.pb")); e != nil {
+		t.Fatal("projection was not published before the simulated crash point")
+	}
+	if res.Outcome == OutcomeAcceptedUpdate {
+		t.Fatal("reported accepted-update despite a crash before the clean transition")
+	}
+
+	// Recovery: next sync reconciles the pending snapshot to clean.
+	crashAfterPublishForTest = nil
+	res2, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders (recovery): %v", err)
+	}
+	if st, _ := readAcceptanceState(ctx, db); st != acceptanceClean {
+		t.Fatalf("did not recover to clean, state=%q outcome=%v", st, res2.Outcome)
+	}
+}
+
+// TestI4F_PublishIncompleteStaysPending (adversarial regression, round 10): the shared publish
+// primitive must return complete=false and leave the snapshot pending when an accepted folder
+// vanished (covers the missing-projection restore and drift-restore paths that share it).
+func TestI4F_PublishIncompleteStaysPending(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	if err := os.RemoveAll(dirA); err != nil {
+		t.Fatalf("remove dir: %v", err)
+	}
+	complete, err := publishAcceptedProjection(ctx, db, root, map[string]struct{}{dirA: {}})
+	if err != nil {
+		t.Fatalf("publishAcceptedProjection: %v", err)
+	}
+	if complete {
+		t.Fatal("publish must be incomplete when an accepted folder vanished")
+	}
+	if st, _ := readAcceptanceState(ctx, db); st != acceptancePending {
+		t.Fatalf("incomplete publish must leave the snapshot pending, got %q", st)
+	}
+}
+
+// TestI4F_DriftRestoreIncompletePending (adversarial regression, round 10): when semantic
+// drift is detected while datablock.pb is missing and the restore cannot complete, the
+// drift-restore path must surface incomplete-pending (not a clean drift HOLD over an
+// incomplete projection).
+func TestI4F_DriftRestoreIncompletePending(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	setRule(t, dir, ruleJSONR2) // drift R1 -> R2 on an accepted folder
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("remove datablock: %v", err)
+	}
+	crashAfterPublishForTest = func() bool { return true } // force the restore to not complete
+	t.Cleanup(func() { crashAfterPublishForTest = nil })
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeIncompletePending {
+		t.Fatalf("drift-restore with an incomplete rebuild must be incomplete-pending, got %v (%s)", res.Outcome, res.Reason)
+	}
+}

@@ -150,11 +150,21 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 			res.Reason = fmt.Sprintf("accepted folder %s has no recoverable classification basis (unverifiable); reclassification required", driftFolder)
 		} else {
 			// Genuine R1->R2 drift: the accepted R1 basis exists, so if the projection is
-			// missing, restore it from that frozen basis (never on-disk R2) before holding.
+			// missing, restore it crash-safely from that frozen basis (never on-disk R2) via
+			// the shared primitive before holding. If an accepted folder vanished so the restore
+			// is incomplete, surface incomplete/pending (retry to converge) rather than a clean
+			// drift HOLD over an incomplete projection.
 			outputDatablock := filepath.Join(rootPath, "datablock.pb")
 			if _, statErr := os.Stat(outputDatablock); os.IsNotExist(statErr) {
-				if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope); rErr != nil {
+				restored, rErr := publishAcceptedProjection(ctx, db, rootPath, inScope)
+				if rErr != nil {
 					return SyncResult{}, rErr
+				}
+				if !restored {
+					res.Outcome = OutcomeIncompletePending
+					res.Reason = fmt.Sprintf("classification-semantics drift on %s, but the projection restore is incomplete (an accepted folder vanished); pending, retry to converge", driftFolder)
+					globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+					return res, nil
 				}
 			}
 			res.Reason = fmt.Sprintf("classification-semantics drift on %s (%s → %s): reclassification required; accepted R1 retained",
@@ -200,21 +210,15 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 			return SyncResult{}, hErr
 		}
 		if hasAcceptedBasis > 0 {
-			restored, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
+			// Restore the missing projection crash-safely via the shared primitive: it records
+			// pending BEFORE replacing datablock.pb and preserves the completeness signal, so a
+			// crash mid-restore (or a folder vanishing before the rebuild) cannot leave an
+			// incomplete projection that reads as clean/unchanged and hides an accepted folder.
+			restored, rErr := publishAcceptedProjection(ctx, db, rootPath, inScope)
 			if rErr != nil {
 				return SyncResult{}, rErr
 			}
 			if !restored {
-				// A folder vanished before this restore, so the rebuilt datablock omits an
-				// accepted row. Do NOT declare it restored/clean: if that folder returns
-				// unchanged before the next sync, the now-existing incomplete projection would
-				// make every later run report "unchanged" and permanently hide the folder's
-				// accepted data. Mark pending (target already == accepted, so reconcile uses the
-				// accepted basis) and report incomplete-pending so the next sync re-projects and
-				// converges (or prunes a truly-removed folder).
-				if mErr := metaSet(ctx, db, metaKeyAcceptanceState, acceptancePending); mErr != nil {
-					return SyncResult{}, mErr
-				}
 				res.Outcome = OutcomeIncompletePending
 				res.Reason = "restored projection is incomplete (an accepted folder vanished); pending, retry to converge"
 				globallog.Log.Warnf("SyncFolders: %s", res.Reason)
