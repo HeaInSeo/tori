@@ -200,8 +200,25 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 			return SyncResult{}, hErr
 		}
 		if hasAcceptedBasis > 0 {
-			if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope); rErr != nil {
+			restored, rErr := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
+			if rErr != nil {
 				return SyncResult{}, rErr
+			}
+			if !restored {
+				// A folder vanished before this restore, so the rebuilt datablock omits an
+				// accepted row. Do NOT declare it restored/clean: if that folder returns
+				// unchanged before the next sync, the now-existing incomplete projection would
+				// make every later run report "unchanged" and permanently hide the folder's
+				// accepted data. Mark pending (target already == accepted, so reconcile uses the
+				// accepted basis) and report incomplete-pending so the next sync re-projects and
+				// converges (or prunes a truly-removed folder).
+				if mErr := metaSet(ctx, db, metaKeyAcceptanceState, acceptancePending); mErr != nil {
+					return SyncResult{}, mErr
+				}
+				res.Outcome = OutcomeIncompletePending
+				res.Reason = "restored projection is incomplete (an accepted folder vanished); pending, retry to converge"
+				globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+				return res, nil
 			}
 			res.Outcome = OutcomeAcceptedUpdate
 			res.Reconcile = true

@@ -305,6 +305,62 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, in
 	return "", "", "", nil
 }
 
+// carryForwardBasesToTarget ensures every in-scope accepted folder has a basis pinned at
+// targetVer before the target is promoted to the accepted version. Reconcile may legitimately
+// project a folder from its accepted-version basis via the pending→accepted fallback (e.g. a
+// folder that was excluded when the pending target was created, then re-included before
+// recovery), but commitClean only flips the version pointer — it does not copy that fallback
+// basis into the target version. Without this carry-forward the folder would be basis-less at
+// the new accepted version and every later sync would wedge on a false reclassify-hold. Copy
+// each such folder's accepted basis to the target version (idempotent for folders already
+// pinned at target) so the promoted accepted basis is complete.
+func carryForwardBasesToTarget(ctx context.Context, db *sql.DB, inScope map[string]struct{}, targetVer, acceptedVer int64) error {
+	if targetVer == acceptedVer {
+		return nil // no version promotion; nothing to carry forward
+	}
+	folders, err := GetFoldersFromDB(db)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin carry-forward tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	for _, f := range folders {
+		if _, ok := inScope[f.Path]; !ok {
+			continue
+		}
+		if _, tOK, gErr := getSemantics(ctx, tx, targetVer, f.Path); gErr != nil {
+			return gErr
+		} else if tOK {
+			continue // already pinned at target (normal beginPendingWithBasis path)
+		}
+		b, aOK, gErr := getSemantics(ctx, tx, acceptedVer, f.Path)
+		if gErr != nil {
+			return gErr
+		}
+		if !aOK {
+			continue // no accepted basis either; pendingBasisHold/drift fail-close on this
+		}
+		// Carry the identical accepted basis forward to the target version (same revision and
+		// origin; only the version key changes).
+		if pErr := pinSemanticsTx(ctx, tx, targetVer, b); pErr != nil {
+			return pErr
+		}
+	}
+	if cErr := tx.Commit(); cErr != nil {
+		return fmt.Errorf("failed to commit carry-forward: %w", cErr)
+	}
+	committed = true
+	return nil
+}
+
 // pendingBasisHold implements TDI-I4F v0.3 (F2): per-in-scope-folder validation that a
 // pending recovery has a resolvable frozen basis for every accepted folder it must rebuild.
 // It replaces the previous aggregate basis-count guard, which a crash mid-scoped-migration

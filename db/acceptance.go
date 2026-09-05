@@ -711,6 +711,18 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 	if err != nil {
 		return false, err
 	}
+	// Before promoting the target to accepted, carry any accepted-fallback basis forward to
+	// the target version. Reconcile may have projected a re-included folder from its accepted
+	// basis (the pending target omitted it); commitClean only flips the version pointer, so
+	// without this the folder would be basis-less at the new accepted version and wedge on a
+	// false reclassify-hold (TDI-I4F v0.3).
+	accepted, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		return false, err
+	}
+	if err := carryForwardBasesToTarget(ctx, db, inScope, target, accepted); err != nil {
+		return false, err
+	}
 	if err := commitClean(ctx, db, target); err != nil {
 		return false, err
 	}

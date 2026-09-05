@@ -1050,3 +1050,51 @@ func TestI4F_MigrationRejectsDuplicateBlockID(t *testing.T) {
 		t.Fatal("migration adopted a basis despite a duplicate-block (non-exact) projection")
 	}
 }
+
+// TestI4F_ReconcileCarriesFallbackBasisForward (adversarial regression, round 9): when a
+// pending target was created while a folder was excluded (its basis pinned only at the prior
+// accepted version) and the exclusion is removed before recovery, reconcile projects that
+// folder from its accepted-basis fallback and promotes the target. commitClean only flips the
+// version pointer, so without carrying the fallback basis forward the folder would be
+// basis-less at the new accepted version and every later sync would wedge on a false
+// reclassify-hold. The carry-forward must pin it at the target version so recovery converges.
+func TestI4F_ReconcileCarriesFallbackBasisForward(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root) // a, b accepted at v1; bases pinned at v1
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	aBasis, ok := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	if !ok {
+		t.Fatal("expected a's accepted basis after baseline")
+	}
+
+	// Crash state: a pending target (v2) that pinned only A (B was excluded when it was
+	// created); B remains accepted with its basis at v1 only.
+	if _, err := beginPendingWithBasis(ctx, db, []folderBasis{aBasis}); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+
+	// Recover with B back in scope.
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("reconcile wedged on a false reclassify-hold: %s", res.Reason)
+	}
+	newAccepted, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if _, ok := acceptedBasis(t, ctx, db, newAccepted, dirB); !ok {
+		t.Fatal("B's fallback basis was not carried forward to the promoted accepted version")
+	}
+	// A subsequent sync must be a clean unchanged, not a false reclassify-hold.
+	res2, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("second SyncFolders: %v", err)
+	}
+	if res2.Outcome != OutcomeUnchanged {
+		t.Fatalf("expected unchanged after carry-forward, got %v (%s)", res2.Outcome, res2.Reason)
+	}
+}
