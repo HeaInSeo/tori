@@ -289,7 +289,7 @@ func TestI4F_T10_ExistingAcceptanceSafetyRetained(t *testing.T) {
 		t.Skipf("cannot chmod root to force observation failure: %v", err)
 	}
 	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
-	_ = os.Chmod(root, 0o750)
+	_ = os.Chmod(root, 0o750) //nolint:gosec // G302: restoring the test temp dir's own perms (a directory needs the execute bit); test-controlled path
 	if err != nil {
 		t.Fatalf("SyncFolders: %v", err)
 	}
