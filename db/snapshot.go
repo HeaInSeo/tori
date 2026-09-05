@@ -77,10 +77,20 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 			return SyncResult{}, cErr
 		}
 		if nTarget == 0 && nAccepted == 0 {
-			res.Outcome = OutcomeReclassifyHold
-			res.Reason = "pending recovery without a provable frozen classification basis; HOLD (re-bootstrap/reclassification required)"
-			globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
-			return res, nil
+			// Zero pinned bases is only a violation when there is accepted inventory to
+			// protect. A pending INITIAL acceptance of an empty root legitimately pins no
+			// basis (zero folders need none); reconcile must regenerate the empty
+			// projection and converge rather than HOLD forever.
+			folders, fErr := GetFoldersFromDB(db)
+			if fErr != nil {
+				return SyncResult{}, fErr
+			}
+			if len(folders) > 0 {
+				res.Outcome = OutcomeReclassifyHold
+				res.Reason = "pending recovery without a provable frozen classification basis; HOLD (re-bootstrap/reclassification required)"
+				globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+				return res, nil
+			}
 		}
 	}
 
@@ -113,10 +123,23 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return res, nil
 	}
 
-	// 5) TDI-I4F drift: a rule-only semantic change on an accepted folder must not read
-	//    as ordinary unchanged and must not adopt R2. Preserve accepted R1 (restoring the
-	//    projection from the accepted frozen basis if datablock.pb is missing) and HOLD.
-	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer); dErr != nil {
+	// Compute the in-scope source folders once: used to scope drift detection and, on
+	// accept, to preflight the frozen basis. observe() already proved coverage COMPLETE.
+	targetFolders, err := GetSubFolders(rootPath, foldersExclusions)
+	if err != nil {
+		globallog.Log.Errorf("GetSubFolders 실패: %v", err)
+		return SyncResult{}, err
+	}
+	inScope := make(map[string]struct{}, len(targetFolders))
+	for _, f := range targetFolders {
+		inScope[f.Path] = struct{}{}
+	}
+
+	// 5) TDI-I4F drift: a rule-only semantic change on an in-scope accepted folder must
+	//    not read as ordinary unchanged and must not adopt R2. Preserve accepted R1
+	//    (restoring the projection from the accepted frozen basis if datablock.pb is
+	//    missing) and HOLD.
+	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer, inScope); dErr != nil {
 		return SyncResult{}, dErr
 	} else if driftFolder != "" {
 		outputDatablock := filepath.Join(rootPath, "datablock.pb")
@@ -179,13 +202,9 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	}
 
 	// 7) Accept as a crash-recoverable unit. Preflight the frozen target basis for every
-	//    confirmed-source folder BEFORE any DB mutation: a missing/invalid rule HOLDs and
-	//    the previous accepted DB + projection are retained together (TDI-I4F §5).
-	targetFolders, err := GetSubFolders(rootPath, foldersExclusions)
-	if err != nil {
-		globallog.Log.Errorf("GetSubFolders 실패: %v", err)
-		return SyncResult{}, err
-	}
+	//    confirmed-source folder (computed once above) BEFORE any DB mutation: a
+	//    missing/invalid rule HOLDs and the previous accepted DB + projection are retained
+	//    together (TDI-I4F §5).
 	targetBasis, err := freezeDiskBasis(folderPaths(targetFolders), originNative)
 	if err != nil {
 		res.Outcome = OutcomeDegradedHold

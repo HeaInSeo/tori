@@ -190,12 +190,19 @@ func diskRevisionID(folderPath string) (string, error) {
 // is NOT treated as drift here (the frozen accepted basis remains authority and the
 // accepted projection is intact); only a readable, semantically-different rule triggers
 // drift. Folders without a pinned accepted basis are skipped (migration handles those).
-func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64) (driftFolder, from, to string, err error) {
+func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, inScope map[string]struct{}) (driftFolder, from, to string, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return "", "", "", err
 	}
 	for _, f := range folders {
+		// Only accepted folders that still participate in the current source scope can
+		// drift. A folder excluded (newly added to foldersExclusions) or removed from
+		// disk is being dropped: let the normal diff/accept path prune it instead of
+		// wedging the whole run on a reclassification HOLD it can never clear.
+		if _, ok := inScope[f.Path]; !ok {
+			continue
+		}
 		pinned, ok, gErr := getSemantics(ctx, db, acceptedVer, f.Path)
 		if gErr != nil {
 			return "", "", "", gErr
@@ -242,12 +249,23 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		return false, "", nil // already has a pinned accepted basis (post-I4F)
 	}
 
-	// A legacy clean snapshot has an EXISTING accepted projection to reproduce. If there
-	// is no datablock.pb, nothing has actually been accepted yet — this is a bootstrap
-	// (possibly with SaveFolders-seeded DB rows), not a migration. The normal accept path
-	// will freeze and pin the basis; do not HOLD here.
-	if _, statErr := os.Stat(filepath.Join(rootPath, "datablock.pb")); os.IsNotExist(statErr) {
-		return false, "", nil
+	// Non-empty inventory with no pinned basis. Distinguish a true bootstrap from a
+	// legacy accepted snapshot by whether a prior accepted projection exists:
+	//   - datablock.pb ABSENT + accepted_version == 0: no clean acceptance was ever
+	//     committed (e.g. SaveFolders-seeded rows before the first accept) → bootstrap;
+	//     the normal accept path freezes and pins the basis.
+	//   - datablock.pb ABSENT + accepted_version >= 1: a prior acceptance existed but its
+	//     projection is gone → reproduction is UNVERIFIABLE → HOLD (never re-adopt the
+	//     current on-disk rules blindly, which would silently reclassify legacy data).
+	//   - datablock.pb PRESENT + no basis: a prior accepted projection exists → this is a
+	//     legacy pre-I4F snapshot; adopt current rules only if they reproduce it.
+	_, statErr := os.Stat(filepath.Join(rootPath, "datablock.pb"))
+	datablockMissing := os.IsNotExist(statErr)
+	if datablockMissing {
+		if acceptedVer == 0 {
+			return false, "", nil
+		}
+		return true, "legacy migration HOLD: accepted snapshot has no pinned classification basis and datablock.pb is missing; historical semantics are unverifiable", nil
 	}
 
 	// Legacy: derive a candidate basis from the current on-disk rules.

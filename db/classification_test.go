@@ -206,7 +206,7 @@ func TestI4F_T07_RulePreflightBeforeDBAdvance(t *testing.T) {
 	if res.Outcome != OutcomeDegradedHold {
 		t.Fatalf("expected rule preflight degraded-hold, got %v (%s)", res.Outcome, res.Reason)
 	}
-	if folderExistsInDB(t, db, dirB) {
+	if folderExistsInDB(t, db, "b") {
 		t.Fatal("new folder with a missing rule was advanced into the accepted DB")
 	}
 	if got := loadBlocks(t, root); !sameBlocks(r1blocks, got) {
@@ -394,6 +394,101 @@ func TestI4F_T13_TargetAcceptedTransitionCrashAtomic(t *testing.T) {
 	}
 	if res.Outcome == OutcomeUnchanged {
 		t.Fatal("crash recovery silently accepted under drifted rule")
+	}
+}
+
+// TestI4F_LegacyDatablockDeletedHolds (adversarial regression): a prior accepted
+// snapshot (accepted_version >= 1) with no pinned basis whose datablock.pb has been
+// deleted must NOT be treated as a bootstrap and silently re-accepted under the current
+// on-disk rules — reproduction is unverifiable, so it HOLDs.
+func TestI4F_LegacyDatablockDeletedHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root) // accepted_version == 1, basis pinned, datablock present
+
+	// Simulate a legacy accepted snapshot whose projection was lost: drop the pinned
+	// basis and the datablock, keep the accepted DB rows + accepted_version + clean.
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("remove datablock: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected HOLD for legacy snapshot with lost projection, got %v (%s)", res.Outcome, res.Reason)
+	}
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if _, ok := acceptedBasis(t, ctx, db, acceptedVer, dir); ok {
+		t.Fatal("adopted a basis for a legacy snapshot whose projection could not be verified")
+	}
+	if !folderExistsInDB(t, db, "f1") {
+		t.Fatal("legacy accepted inventory was wiped instead of held")
+	}
+}
+
+// TestI4F_DriftIgnoresExcludedFolders (adversarial regression): an accepted folder that
+// is newly excluded from scope must not wedge the run on a drift HOLD even if its rule
+// also changed; it is pruned by the normal diff/accept path.
+func TestI4F_DriftIgnoresExcludedFolders(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root) // accept both a and b
+
+	// b's rule drifts AND b is newly excluded from scope.
+	setRule(t, dirB, ruleJSONR2)
+	res, err := SyncFolders(ctx, db, root, []string{"b"}, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("drift on an out-of-scope (excluded) folder wedged the run: %s", res.Reason)
+	}
+	if folderExistsInDB(t, db, "b") {
+		t.Fatal("excluded folder b was not pruned from the accepted DB")
+	}
+	if !folderExistsInDB(t, db, "a") {
+		t.Fatal("in-scope folder a was wrongly dropped")
+	}
+}
+
+// TestI4F_EmptyRootPendingReconciles (adversarial regression): a crash after
+// beginPendingWithBasis during an EMPTY-root acceptance (zero folders → zero basis) must
+// reconcile to a clean empty snapshot on restart, not HOLD forever on "zero bases".
+func TestI4F_EmptyRootPendingReconciles(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir() // empty source root
+	db := newAcceptanceDB(t)
+
+	// Crash window: pending initial acceptance of an empty root pins no basis.
+	if _, err := beginPendingWithBasis(ctx, db, nil); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+	if state, _ := readAcceptanceState(ctx, db); state != acceptancePending {
+		t.Fatalf("expected pending, got %q", state)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("empty-root pending wrongly HELD instead of reconciling: %s", res.Reason)
+	}
+	if state, _ := readAcceptanceState(ctx, db); state != acceptanceClean {
+		t.Fatalf("expected clean after empty reconcile, got %q", state)
+	}
+	if _, err := os.Stat(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("empty reconcile did not regenerate a datablock: %v", err)
 	}
 }
 
