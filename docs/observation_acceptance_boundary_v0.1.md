@@ -190,6 +190,32 @@ Two related fail-closed refinements at the acceptance boundary:
 This is provenance of acceptance-state history only — not a SourceID/Generation/publication
 authority.
 
+## Known limitation — permanent-removal + drift convergence (centrally accepted)
+
+There is one narrow, centrally-accepted liveness residual in the crash-recovery path. It
+requires all three of the following at once:
+
+1. the acceptance is `pending` (a prior accept/reconcile was interrupted),
+2. an accepted folder is **permanently** absent from the (scope-confirmed) source, and
+3. **another** accepted folder's `rule.json` has drifted from its frozen basis.
+
+In that state `SyncFolders` returns `incomplete-pending`: the reconcile cannot complete
+(a folder is absent), and the classification-semantics drift HOLD is surfaced before the
+normal diff/prune path would remove the absent folder, so the absent folder's DB row is not
+pruned. The snapshot therefore stays `pending`/`incomplete-pending` until an operator either
+restores the folder or reverts the drifted rule.
+
+This is a **liveness** limitation, not a safety defect: it is fail-closed, retains the
+accepted DB + projection, never silently reinterprets accepted data, never reports the
+incomplete state as `clean`/`accepted`, and loses no data. It is operator-recoverable
+(restore the folder, or revert the rule and let the next sync converge).
+
+It is **not** fixed by pruning during recovery: current source-scope observation cannot, on
+its own, distinguish a transient absence from an authoritative permanent deletion, and a
+recovery-time destructive prune would risk the landed I1 guarantee that *absence must not
+silently wipe accepted inventory*. A permanent-removal authority and recovery-prune
+convergence are deferred to a separate follow-up design/packet.
+
 ## Known deferred item
 
 Projection generation (`rules`/`block`) emits its own side-files. `fileblock.csv`
