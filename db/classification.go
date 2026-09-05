@@ -148,39 +148,51 @@ func resolveFrozenRuleSet(ctx context.Context, e sqlDBTX, folderPath string, pen
 		ErrFrozenBasisUnavailable, folderPath, pending, acceptedVer, targetVer)
 }
 
-// freezeDiskBasis loads, validates, canonicalizes and freezes the on-disk rule.json for
-// each folder, returning the pinned-ready target basis set. Any folder whose rule is
-// missing/unreadable/invalid yields an error so the caller HOLDs BEFORE the accepted DB
-// advances (rule preflight must precede DB mutation).
-func freezeDiskBasis(folderPaths []string, origin string) ([]folderBasis, error) {
-	bases := make([]folderBasis, 0, len(folderPaths))
+// freezeDiskBases loads, validates, canonicalizes and freezes each folder's on-disk
+// rule.json exactly ONCE, returning a path->basis map, whether ALL froze successfully,
+// and the first error. The SAME frozen values are used for both drift comparison and
+// acceptance, so a rule cannot change between a "check" read and a separate "pin" read
+// (TOCTOU): what is compared for drift is exactly what would be pinned. allOK==false
+// means at least one folder's rule is missing/unreadable/invalid — the accept path
+// treats that as a preflight HOLD before the accepted DB advances, while drift/unchanged
+// runs simply skip the folders absent from the map (their frozen accepted basis stays
+// authoritative).
+func freezeDiskBases(folderPaths []string, origin string) (map[string]folderBasis, bool, error) {
+	bases := make(map[string]folderBasis, len(folderPaths))
+	allOK := true
+	var firstErr error
 	for _, p := range folderPaths {
 		rs, err := rules.LoadRuleSetFromFile(p)
 		if err != nil {
-			return nil, fmt.Errorf("rule preflight failed for %s: %w", p, err)
+			allOK = false
+			if firstErr == nil {
+				firstErr = fmt.Errorf("rule preflight failed for %s: %w", p, err)
+			}
+			continue
 		}
 		canonical, revID, err := rules.FreezeRuleSet(rs)
 		if err != nil {
-			return nil, fmt.Errorf("rule preflight failed for %s: %w", p, err)
+			allOK = false
+			if firstErr == nil {
+				firstErr = fmt.Errorf("rule preflight failed for %s: %w", p, err)
+			}
+			continue
 		}
-		bases = append(bases, folderBasis{Path: p, RevisionID: revID, Canonical: canonical, Origin: origin})
+		bases[p] = folderBasis{Path: p, RevisionID: revID, Canonical: canonical, Origin: origin}
 	}
-	return bases, nil
+	return bases, allOK, firstErr
 }
 
-// diskRevisionID freezes the current on-disk rule.json of folderPath and returns its
-// revision id. Used only to COMPARE against a pinned basis (drift detection); it is
-// never used as projection authority.
-func diskRevisionID(folderPath string) (string, error) {
-	rs, err := rules.LoadRuleSetFromFile(folderPath)
-	if err != nil {
-		return "", err
+// basesSlice returns the frozen bases for the given paths, in the paths' order, skipping
+// any path that failed to freeze (absent from the map).
+func basesSlice(frozen map[string]folderBasis, paths []string) []folderBasis {
+	out := make([]folderBasis, 0, len(paths))
+	for _, p := range paths {
+		if b, ok := frozen[p]; ok {
+			out = append(out, b)
+		}
 	}
-	_, revID, err := rules.FreezeRuleSet(rs)
-	if err != nil {
-		return "", err
-	}
-	return revID, nil
+	return out
 }
 
 // detectSemanticsDrift compares each accepted folder's on-disk rule.json against its
@@ -190,17 +202,21 @@ func diskRevisionID(folderPath string) (string, error) {
 // is NOT treated as drift here (the frozen accepted basis remains authority and the
 // accepted projection is intact); only a readable, semantically-different rule triggers
 // drift. Folders without a pinned accepted basis are skipped (migration handles those).
-func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, inScope map[string]struct{}) (driftFolder, from, to string, err error) {
+//
+// frozen is the once-frozen in-scope disk basis (freezeDiskBases). Drift compares the
+// SAME frozen value that acceptance would pin, so no rule.json is re-read here (TOCTOU-
+// free). A folder absent from frozen — out of the current scope (excluded/removed) or
+// whose on-disk rule is unreadable/invalid — is not a drift signal: an out-of-scope
+// folder is pruned by the diff path, and an unreadable rule leaves the pinned accepted
+// basis authoritative for projection.
+func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, frozen map[string]folderBasis) (driftFolder, from, to string, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return "", "", "", err
 	}
 	for _, f := range folders {
-		// Only accepted folders that still participate in the current source scope can
-		// drift. A folder excluded (newly added to foldersExclusions) or removed from
-		// disk is being dropped: let the normal diff/accept path prune it instead of
-		// wedging the whole run on a reclassification HOLD it can never clear.
-		if _, ok := inScope[f.Path]; !ok {
+		cand, inScopeFrozen := frozen[f.Path]
+		if !inScopeFrozen {
 			continue
 		}
 		pinned, ok, gErr := getSemantics(ctx, db, acceptedVer, f.Path)
@@ -210,15 +226,8 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, in
 		if !ok {
 			continue
 		}
-		diskRev, dErr := diskRevisionID(f.Path)
-		if dErr != nil {
-			// On-disk rule unreadable/invalid: not a semantic-difference signal here.
-			// The pinned accepted basis stays authoritative for projection.
-			logger.Warnf("drift check: on-disk rule for %s unreadable/invalid; keeping accepted basis: %v", f.Path, dErr)
-			continue
-		}
-		if diskRev != pinned.RevisionID {
-			return f.Path, pinned.RevisionID, diskRev, nil
+		if cand.RevisionID != pinned.RevisionID {
+			return f.Path, pinned.RevisionID, cand.RevisionID, nil
 		}
 	}
 	return "", "", "", nil
@@ -233,7 +242,7 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, in
 // regenerated projection does not match the stored one, or the stored projection cannot
 // be read, it does NOT adopt and reports held=true so the caller HOLDs rather than
 // guessing historical semantics.
-func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string, acceptedVer int64) (held bool, reason string, err error) {
+func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string, acceptedVer int64, inScope map[string]struct{}, frozen map[string]folderBasis) (held bool, reason string, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return false, "", err
@@ -268,13 +277,14 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		return true, "legacy migration HOLD: accepted snapshot has no pinned classification basis and datablock.pb is missing; historical semantics are unverifiable", nil
 	}
 
-	// Legacy: derive a candidate basis from the current on-disk rules.
-	folderFiles, complete, err := buildFolderFilesFromDB(db)
+	// Legacy: derive a candidate basis from the once-frozen in-scope rules. Only IN-SCOPE
+	// present folders are reproduced/adopted; an out-of-scope (excluded) or physically
+	// removed accepted folder is skipped by buildFolderFilesFromDB (complete=false) and is
+	// pruned by the normal diff path, so it does not block migration of the remaining
+	// inventory.
+	folderFiles, _, err := buildFolderFilesFromDB(db, inScope)
 	if err != nil {
 		return false, "", err
-	}
-	if !complete {
-		return true, "legacy migration HOLD: an accepted folder is no longer present on disk; cannot verify historical semantics", nil
 	}
 	candidates := make([]folderBasis, 0, len(folderFiles))
 	expectedBlocks := make(map[string]*pb.FileBlock)
@@ -287,20 +297,22 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		if len(ff) > 1 {
 			names = ff[1:]
 		}
-		rs, lErr := rules.LoadRuleSetFromFile(folderPath)
-		if lErr != nil {
-			return true, fmt.Sprintf("legacy migration HOLD: rule basis for %s unverifiable: %v", folderPath, lErr), nil
+		basis, ok := frozen[folderPath]
+		if !ok {
+			return true, fmt.Sprintf("legacy migration HOLD: rule basis for %s is missing/invalid; historical semantics unverifiable", folderPath), nil
 		}
-		canonical, revID, fErr := rules.FreezeRuleSet(rs)
-		if fErr != nil {
-			return true, fmt.Sprintf("legacy migration HOLD: rule basis for %s unverifiable: %v", folderPath, fErr), nil
+		rs, rErr := rules.RuleSetFromCanonical(basis.Canonical)
+		if rErr != nil {
+			return true, fmt.Sprintf("legacy migration HOLD: frozen basis for %s unusable: %v", folderPath, rErr), nil
 		}
 		fb, pErr := block.ProjectFileBlock(folderPath, names, rs)
 		if pErr != nil {
 			return true, fmt.Sprintf("legacy migration HOLD: cannot project %s with current rules: %v", folderPath, pErr), nil
 		}
 		expectedBlocks[folderPath] = fb
-		candidates = append(candidates, folderBasis{Path: folderPath, RevisionID: revID, Canonical: canonical, Origin: originMigrationAdopted})
+		candidates = append(candidates, folderBasis{
+			Path: folderPath, RevisionID: basis.RevisionID, Canonical: basis.Canonical, Origin: originMigrationAdopted,
+		})
 	}
 
 	// Verify the candidate basis reproduces the existing accepted projection exactly.
@@ -349,9 +361,10 @@ func candidateReproducesAcceptedProjection(rootPath string, expected map[string]
 	for _, b := range stored.GetBlocks() {
 		storedBlocks[b.GetBlockId()] = b
 	}
-	if len(storedBlocks) != len(expected) {
-		return false, fmt.Sprintf("block count differs (accepted=%d, regenerated=%d)", len(storedBlocks), len(expected))
-	}
+	// Subset match: every in-scope (expected) folder's regenerated block must match the
+	// stored accepted block. Stored blocks for folders no longer in scope (excluded or
+	// removed) are intentionally not required to match — they are being pruned by the diff
+	// path and their basis is not adopted.
 	for id, want := range expected {
 		got, ok := storedBlocks[id]
 		if !ok {

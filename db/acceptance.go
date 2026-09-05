@@ -478,7 +478,13 @@ func pathWithinRoot(p, root string) bool {
 // same accepted inventory always projects to the same FileBlock/row ordering,
 // regardless of DB row order or the history by which the snapshot was reached
 // (reproducibility: same data + same method = same result).
-func buildFolderFilesFromDB(db *sql.DB) (folderFiles [][]string, complete bool, err error) {
+// inScope, when non-nil, restricts the projection to the current source scope: an
+// accepted DB folder that is out of scope (newly excluded via foldersExclusions) is
+// skipped exactly like a physically-removed folder and marks complete=false, so a
+// reconcile defers the clean mark and lets the diff/accept path prune it — this keeps a
+// promoted target from ever leaving an out-of-scope folder in the accepted DB without a
+// basis at the accepted version. A nil inScope means "no scope filter" (all DB folders).
+func buildFolderFilesFromDB(db *sql.DB, inScope map[string]struct{}) (folderFiles [][]string, complete bool, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return nil, false, err
@@ -487,6 +493,13 @@ func buildFolderFilesFromDB(db *sql.DB) (folderFiles [][]string, complete bool, 
 	folderFiles = make([][]string, 0, len(folders))
 	complete = true
 	for _, folder := range folders {
+		if inScope != nil {
+			if _, ok := inScope[folder.Path]; !ok {
+				logger.Warnf("reconcile: skipping out-of-scope accepted folder (excluded): %s", folder.Path)
+				complete = false
+				continue
+			}
+		}
 		if info, statErr := os.Stat(folder.Path); statErr != nil || !info.IsDir() {
 			logger.Warnf("reconcile: skipping folder no longer present on disk: %s", folder.Path)
 			complete = false
@@ -509,8 +522,8 @@ func buildFolderFilesFromDB(db *sql.DB) (folderFiles [][]string, complete bool, 
 // acceptance and crash-recovery reconcile, which keeps the two idempotent. It
 // returns complete=false when the projection had to omit an accepted folder that
 // is no longer present on disk.
-func regenerateProjectionFromDB(ctx context.Context, db *sql.DB, rootPath string) (bool, error) {
-	folderFiles, complete, err := buildFolderFilesFromDB(db)
+func regenerateProjectionFromDB(ctx context.Context, db *sql.DB, rootPath string, inScope map[string]struct{}) (bool, error) {
+	folderFiles, complete, err := buildFolderFilesFromDB(db, inScope)
 	if err != nil {
 		return false, err
 	}
@@ -649,7 +662,7 @@ func readAcceptanceState(ctx context.Context, db *sql.DB) (state string, err err
 // the projection from the accepted DB and marks the snapshot clean. It must run
 // before any "unchanged" can be returned. It is idempotent: rebuilding a projection
 // that is already correct simply rewrites identical inventory and converges.
-func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool, error) {
+func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScope map[string]struct{}) (bool, error) {
 	state, err := readAcceptanceState(ctx, db)
 	if err != nil {
 		return false, err
@@ -657,7 +670,7 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool,
 	if state != acceptancePending {
 		return false, nil
 	}
-	complete, err := regenerateProjectionFromDB(ctx, db, rootPath)
+	complete, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
 	if err != nil {
 		return false, err
 	}
@@ -693,7 +706,7 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool,
 // per-folder classification basis for every folder that will participate in the accepted
 // projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
 // invalid rule HOLDs before any DB row advances (TDI-I4F §5).
-func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis) error {
+func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, inScope map[string]struct{}) error {
 	target, err := beginPendingWithBasis(ctx, db, targetBasis)
 	if err != nil {
 		return err
@@ -707,8 +720,10 @@ func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []Folder
 	}
 	// acceptWork projects the accepted DB it just wrote to match the confirmed source,
 	// so the rebuild is expected to be complete; the completeness flag is consumed by
-	// the reconcile path (not here), where a vanished folder must defer the clean mark.
-	if _, err := regenerateProjectionFromDB(ctx, db, rootPath); err != nil {
+	// the reconcile path (not here), where a vanished/out-of-scope folder must defer the
+	// clean mark. The DB has just been pruned to the in-scope set, so filtering here is a
+	// no-op in the normal path.
+	if _, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope); err != nil {
 		return err
 	}
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {

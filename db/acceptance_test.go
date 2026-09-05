@@ -980,7 +980,7 @@ func TestReconcile_IncompleteRebuildDefersClean(t *testing.T) {
 		t.Fatalf("remove set_b: %v", err)
 	}
 
-	reconciled, err := reconcileIfPending(ctx, db, root)
+	reconciled, err := reconcileIfPending(ctx, db, root, nil)
 	if err != nil {
 		t.Fatalf("reconcileIfPending: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestReconcile_ProjectionOrderingDeterministic(t *testing.T) {
 	db := newAcceptanceDB(t)
 	acceptBaseline(t, db, root)
 
-	rows, complete, err := buildFolderFilesFromDB(db)
+	rows, complete, err := buildFolderFilesFromDB(db, nil)
 	if err != nil {
 		t.Fatalf("buildFolderFilesFromDB: %v", err)
 	}

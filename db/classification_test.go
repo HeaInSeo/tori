@@ -461,6 +461,86 @@ func TestI4F_DriftIgnoresExcludedFolders(t *testing.T) {
 	}
 }
 
+// TestI4F_ExcludedFolderCrashWindowPrunesNotOrphans (adversarial regression, round 2):
+// crash after beginPendingWithBasis with an in-scope-only target basis, while a folder
+// being excluded is still in the DB, must not promote an incomplete target that leaves
+// the excluded folder basis-less. Recovery skips the out-of-scope folder (like a removed
+// one), defers the clean mark, and the diff/accept path prunes it — converging without a
+// wedge or an orphaned basis-less folder.
+func TestI4F_ExcludedFolderCrashWindowPrunesNotOrphans(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	aBasis, ok := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	if !ok {
+		t.Fatal("expected a's accepted basis after baseline")
+	}
+	// Crash window: pending target pins only the in-scope folder (a); b is being excluded
+	// but still sits in the DB.
+	if _, err := beginPendingWithBasis(ctx, db, []folderBasis{aBasis}); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, []string{"b"}, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("excluded folder in crash window wedged recovery: %s", res.Reason)
+	}
+	if folderExistsInDB(t, db, "b") {
+		t.Fatal("excluded folder b was left in the accepted DB (orphaned)")
+	}
+	if !folderExistsInDB(t, db, "a") {
+		t.Fatal("in-scope folder a was dropped during recovery")
+	}
+	newVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if _, ok := acceptedBasis(t, ctx, db, newVer, dirA); !ok {
+		t.Fatal("a has no basis at the promoted accepted version")
+	}
+	if state, _ := readAcceptanceState(ctx, db); state != acceptanceClean {
+		t.Fatalf("expected clean convergence, got %q", state)
+	}
+}
+
+// TestI4F_MigrationIgnoresExcludedFolder (adversarial regression, round 2): legacy
+// migration must not HOLD because an OUT-OF-SCOPE (excluded) folder's rule changed; it
+// reproduces/adopts only the in-scope folders and lets the diff prune the excluded one.
+func TestI4F_MigrationIgnoresExcludedFolder(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	// Legacy: drop the pinned basis (datablock + rows remain).
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	// b (to be excluded) drifts; a stays R1.
+	setRule(t, dirB, ruleJSONR2)
+
+	res, err := SyncFolders(ctx, db, root, []string{"b"}, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome == OutcomeReclassifyHold {
+		t.Fatalf("legacy migration wrongly HELD on an out-of-scope drifted folder: %s", res.Reason)
+	}
+	if folderExistsInDB(t, db, "b") {
+		t.Fatal("excluded folder b was not pruned")
+	}
+	if !folderExistsInDB(t, db, "a") {
+		t.Fatal("in-scope folder a was dropped")
+	}
+}
+
 // TestI4F_EmptyRootPendingReconciles (adversarial regression): a crash after
 // beginPendingWithBasis during an EMPTY-root acceptance (zero folders → zero basis) must
 // reconcile to a clean empty snapshot on restart, not HOLD forever on "zero bases".
