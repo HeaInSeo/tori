@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/HeaInSeo/tori/block"
+	"github.com/HeaInSeo/tori/rules"
 )
 
 // This file implements the TDI-I1+I10 "Legacy Observation Acceptance Boundary".
@@ -131,6 +132,15 @@ const (
 	// was UNKNOWN or coverage was not COMPLETE. The previous accepted DB and
 	// projection are retained together, untouched.
 	OutcomeDegradedHold
+	// OutcomeReclassifyHold means the observation was not accepted because the on-disk
+	// classification semantics (rule.json) drifted from the accepted frozen basis, or a
+	// legacy/pending snapshot's frozen basis could not be proven (TDI-I4F). This is
+	// deliberately DISTINCT from OutcomeUnchanged (a rule-only change is not "no change")
+	// and from OutcomeDegradedHold (scope/coverage): the accepted R1 DB + projection are
+	// retained, R2 is not adopted, and no new/changed data is accepted under stale R1.
+	// Resolving it requires the later reclassification/publication path, which I4F does
+	// not implement.
+	OutcomeReclassifyHold
 )
 
 func (o SyncOutcome) String() string {
@@ -139,6 +149,8 @@ func (o SyncOutcome) String() string {
 		return "accepted-update"
 	case OutcomeDegradedHold:
 		return "degraded-hold"
+	case OutcomeReclassifyHold:
+		return "reclassify-hold"
 	default:
 		return "unchanged"
 	}
@@ -451,9 +463,12 @@ func pathWithinRoot(p, root string) bool {
 // accepted inventory rather than a possibly-drifted disk enumeration.
 //
 // A folder that vanished from disk during a crash window is skipped rather than
-// failing the whole rebuild: projection generation reads each folder's rule.json
-// from disk, so a since-removed folder would otherwise hard-error and wedge
-// reconcile into a permanent pending state. Skipping keeps reconcile convergent;
+// failing the whole rebuild: projection generation still needs the folder directory
+// present to write its compatibility artifacts (csv/invalid/*.pb), so a since-removed
+// folder would otherwise hard-error and wedge reconcile into a permanent pending state.
+// (The classification rule itself comes from the frozen pinned basis, never disk
+// rule.json, per TDI-I4F; only the folder's on-disk presence is required here.)
+// Skipping keeps reconcile convergent;
 // the removal is then applied authoritatively by the normal diff path in the same
 // SyncFolders call (which prunes the DB row and rebuilds a consistent projection).
 // It reports complete=false when any folder had to be skipped, so callers do not
@@ -494,12 +509,32 @@ func buildFolderFilesFromDB(db *sql.DB) (folderFiles [][]string, complete bool, 
 // acceptance and crash-recovery reconcile, which keeps the two idempotent. It
 // returns complete=false when the projection had to omit an accepted folder that
 // is no longer present on disk.
-func regenerateProjectionFromDB(db *sql.DB, rootPath string) (bool, error) {
+func regenerateProjectionFromDB(ctx context.Context, db *sql.DB, rootPath string) (bool, error) {
 	folderFiles, complete, err := buildFolderFilesFromDB(db)
 	if err != nil {
 		return false, err
 	}
-	fbs, err := block.GenerateFBs(folderFiles)
+	// TDI-I4F: project against the FROZEN classification basis (target while pending,
+	// accepted while clean), never the mutable on-disk rule.json. A folder with no
+	// resolvable frozen basis fails closed (ErrFrozenBasisUnavailable) rather than
+	// silently reinterpreting the accepted DB under a later rule.
+	state, err := readAcceptanceState(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	acceptedVer, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		return false, err
+	}
+	targetVer, err := metaGetInt(ctx, db, metaKeyTargetVersion)
+	if err != nil {
+		return false, err
+	}
+	pending := state == acceptancePending
+	ruleFor := func(folderPath string) (rules.RuleSet, error) {
+		return resolveFrozenRuleSet(ctx, db, folderPath, pending, acceptedVer, targetVer)
+	}
+	fbs, err := block.GenerateFBsWithRules(folderFiles, ruleFor)
 	if err != nil {
 		return false, fmt.Errorf("failed to generate FileBlocks from accepted DB: %w", err)
 	}
@@ -528,13 +563,74 @@ func beginPending(ctx context.Context, db *sql.DB) (int64, error) {
 	return target, nil
 }
 
-// commitClean marks the acceptance durable: the projection has been written and
-// the accepted version now equals the applied target.
+// beginPendingWithBasis is beginPending that ALSO durably pins the complete target
+// classification-semantics basis, all in a single transaction (TDI-I4F §6). The exact
+// target rule basis for every participating folder is therefore committed atomically
+// with the pending transition, BEFORE any accepted DB row mutates: a crash after this
+// commit can only leave state=pending with a complete, resolvable target basis under
+// target_version, never a pending target with an indeterminate rule basis.
+func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folderBasis) (int64, error) {
+	accepted, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		return 0, err
+	}
+	target := accepted + 1
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin pending+basis tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := metaSet(ctx, tx, metaKeyTargetVersion, strconv.FormatInt(target, 10)); err != nil {
+		return 0, err
+	}
+	if err := metaSet(ctx, tx, metaKeyAcceptanceState, acceptancePending); err != nil {
+		return 0, err
+	}
+	for _, b := range targetBasis {
+		if err := pinSemanticsTx(ctx, tx, target, b); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit pending+basis: %w", err)
+	}
+	committed = true
+	return target, nil
+}
+
+// commitClean marks the acceptance durable: the projection has been written and the
+// accepted version now equals the applied target. The two meta writes run in one
+// transaction so promotion of the target basis to the accepted basis (accepted_version
+// = target) is atomic with the clean transition (TDI-I4F §6): "accepted basis" is
+// exactly the classification_semantics rows under accepted_version, so flipping the
+// pointer promotes the whole target basis at once.
 func commitClean(ctx context.Context, db *sql.DB, target int64) error {
-	if err := metaSet(ctx, db, metaKeyAcceptedVersion, strconv.FormatInt(target, 10)); err != nil {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin commit-clean tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := metaSet(ctx, tx, metaKeyAcceptedVersion, strconv.FormatInt(target, 10)); err != nil {
 		return err
 	}
-	return metaSet(ctx, db, metaKeyAcceptanceState, acceptanceClean)
+	if err := metaSet(ctx, tx, metaKeyAcceptanceState, acceptanceClean); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit clean transition: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // readAcceptanceState reports whether an acceptance is currently pending.
@@ -561,7 +657,7 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool,
 	if state != acceptancePending {
 		return false, nil
 	}
-	complete, err := regenerateProjectionFromDB(db, rootPath)
+	complete, err := regenerateProjectionFromDB(ctx, db, rootPath)
 	if err != nil {
 		return false, err
 	}
@@ -591,23 +687,28 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string) (bool,
 }
 
 // acceptWork applies a confirmed+complete observation as a crash-recoverable unit:
-// pending marker → atomic DB mutation → projection rebuild → clean marker.
-func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange) error {
-	target, err := beginPending(ctx, db)
+// pending marker + frozen target basis (one tx) → atomic DB mutation → projection
+// rebuild from the pinned target basis → clean marker (which atomically promotes the
+// target basis to the accepted basis). targetBasis is the complete, already-frozen
+// per-folder classification basis for every folder that will participate in the accepted
+// projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
+// invalid rule HOLDs before any DB row advances (TDI-I4F §5).
+func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis) error {
+	target, err := beginPendingWithBasis(ctx, db, targetBasis)
 	if err != nil {
 		return err
 	}
 	if len(diffs) > 0 || len(changes) > 0 {
 		if err := UpdateDB(ctx, db, diffs, changes); err != nil {
 			// The mutation is atomic (single tx); on failure the DB is unchanged.
-			// The pending marker remains so the next run reconciles safely.
+			// The pending marker + target basis remain so the next run reconciles safely.
 			return err
 		}
 	}
 	// acceptWork projects the accepted DB it just wrote to match the confirmed source,
 	// so the rebuild is expected to be complete; the completeness flag is consumed by
 	// the reconcile path (not here), where a vanished folder must defer the clean mark.
-	if _, err := regenerateProjectionFromDB(db, rootPath); err != nil {
+	if _, err := regenerateProjectionFromDB(ctx, db, rootPath); err != nil {
 		return err
 	}
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {

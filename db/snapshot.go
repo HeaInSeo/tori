@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -50,8 +51,42 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return SyncResult{}, err
 	}
 
-	// 2) Reconcile any incomplete prior acceptance BEFORE we can report "unchanged".
-	//    This closes I10: DB may have advanced while the projection stayed stale.
+	// 2) TDI-I4F pending-basis guard: a pending recovery must have a provable frozen
+	//    classification basis. A pre-I4F pending state (or one whose basis was lost) has
+	//    none, so reconciling would rebuild from the mutable on-disk rule — HOLD
+	//    fail-closed instead of guessing historical semantics (TDI-I4F §7/§9).
+	state, err := readAcceptanceState(ctx, db)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	if state == acceptancePending {
+		targetVer, tErr := metaGetInt(ctx, db, metaKeyTargetVersion)
+		if tErr != nil {
+			return SyncResult{}, tErr
+		}
+		acceptedVer, aErr := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+		if aErr != nil {
+			return SyncResult{}, aErr
+		}
+		nTarget, cErr := countSemanticsAtVersion(ctx, db, targetVer)
+		if cErr != nil {
+			return SyncResult{}, cErr
+		}
+		nAccepted, cErr := countSemanticsAtVersion(ctx, db, acceptedVer)
+		if cErr != nil {
+			return SyncResult{}, cErr
+		}
+		if nTarget == 0 && nAccepted == 0 {
+			res.Outcome = OutcomeReclassifyHold
+			res.Reason = "pending recovery without a provable frozen classification basis; HOLD (re-bootstrap/reclassification required)"
+			globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+			return res, nil
+		}
+	}
+
+	// 3) Reconcile any incomplete prior acceptance BEFORE we can report "unchanged".
+	//    This closes I10: DB may have advanced while the projection stayed stale. The
+	//    rebuild now projects from the FROZEN target basis, never disk rule.json.
 	reconciled, err := reconcileIfPending(ctx, db, rootPath)
 	if err != nil {
 		globallog.Log.Errorf("reconcile 실패: %v", err)
@@ -61,7 +96,43 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		globallog.Log.Warn("SyncFolders: 불완전 수용 감지 → 프로젝션 재생성(reconcile) 완료")
 	}
 
-	// 3) Diff the confirmed+complete source against the accepted DB. The disk
+	acceptedVer, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	// 4) TDI-I4F legacy migration bootstrap: a pre-I4F clean snapshot has accepted rows
+	//    but no pinned classification basis. Adopt the current rules as migration-time
+	//    semantics ONLY if they reproduce the accepted projection; otherwise HOLD.
+	if held, reason, mErr := migrateLegacyBasisIfNeeded(ctx, db, rootPath, acceptedVer); mErr != nil {
+		return SyncResult{}, mErr
+	} else if held {
+		res.Outcome = OutcomeReclassifyHold
+		res.Reason = reason
+		globallog.Log.Warnf("SyncFolders HOLD: %s", reason)
+		return res, nil
+	}
+
+	// 5) TDI-I4F drift: a rule-only semantic change on an accepted folder must not read
+	//    as ordinary unchanged and must not adopt R2. Preserve accepted R1 (restoring the
+	//    projection from the accepted frozen basis if datablock.pb is missing) and HOLD.
+	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer); dErr != nil {
+		return SyncResult{}, dErr
+	} else if driftFolder != "" {
+		outputDatablock := filepath.Join(rootPath, "datablock.pb")
+		if _, statErr := os.Stat(outputDatablock); os.IsNotExist(statErr) {
+			if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath); rErr != nil {
+				return SyncResult{}, rErr
+			}
+		}
+		res.Outcome = OutcomeReclassifyHold
+		res.Reason = fmt.Sprintf("classification-semantics drift on %s (%s → %s): reclassification required; accepted R1 retained",
+			driftFolder, shortRev(fromRev), shortRev(toRev))
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
+	}
+
+	// 6) Diff the confirmed+complete source against the accepted DB. The disk
 	//    folderFiles byproduct is intentionally discarded: the projection is rebuilt
 	//    from the accepted DB (see acceptWork), never from this raw disk snapshot.
 	_, fDiff, fChange, err := DiffFolders(db, rootPath, foldersExclusions, filesExclusions)
@@ -72,24 +143,62 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 
 	outputDatablock := filepath.Join(rootPath, "datablock.pb")
 	_, statErr := os.Stat(outputDatablock)
-	firstRun := os.IsNotExist(statErr)
+	projectionMissing := os.IsNotExist(statErr)
+	dataChanged := fDiff != nil || fChange != nil
 
-	needsUpdate := firstRun || fDiff != nil || fChange != nil
-	if !needsUpdate {
+	if !dataChanged {
 		if reconciled {
 			res.Outcome = OutcomeAcceptedUpdate
 			res.Reconcile = true
 			res.Reason = "reconciled incomplete prior acceptance"
 			return res, nil
 		}
-		globallog.Log.Info("all files and folders are same & datablock.pb exists; skipping update.")
-		res.Outcome = OutcomeUnchanged
+		if !projectionMissing {
+			globallog.Log.Info("all files and folders are same & datablock.pb exists; skipping update.")
+			res.Outcome = OutcomeUnchanged
+			return res, nil
+		}
+		// TDI-I4F firstRun laundering closure: a missing datablock.pb with an EXISTING
+		// accepted frozen basis must be rebuilt from that basis (no version bump, no
+		// clean-accept of on-disk R2). If no accepted basis is pinned yet, this is a
+		// bootstrap (possibly with SaveFolders-seeded rows) — fall through to first
+		// acceptance below, which freezes and pins the basis.
+		hasAcceptedBasis, hErr := countSemanticsAtVersion(ctx, db, acceptedVer)
+		if hErr != nil {
+			return SyncResult{}, hErr
+		}
+		if hasAcceptedBasis > 0 {
+			if _, rErr := regenerateProjectionFromDB(ctx, db, rootPath); rErr != nil {
+				return SyncResult{}, rErr
+			}
+			res.Outcome = OutcomeAcceptedUpdate
+			res.Reconcile = true
+			res.Reason = "restored missing projection from accepted frozen basis"
+			return res, nil
+		}
+	}
+
+	// 7) Accept as a crash-recoverable unit. Preflight the frozen target basis for every
+	//    confirmed-source folder BEFORE any DB mutation: a missing/invalid rule HOLDs and
+	//    the previous accepted DB + projection are retained together (TDI-I4F §5).
+	targetFolders, err := GetSubFolders(rootPath, foldersExclusions)
+	if err != nil {
+		globallog.Log.Errorf("GetSubFolders 실패: %v", err)
+		return SyncResult{}, err
+	}
+	targetBasis, err := freezeDiskBasis(folderPaths(targetFolders), originNative)
+	if err != nil {
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reason = fmt.Sprintf("rule preflight HOLD: %v", err)
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
 		return res, nil
 	}
 
-	// 4) Accept as a crash-recoverable unit: pending → atomic DB mutation →
-	//    projection rebuild from the accepted DB → clean.
-	if err := acceptWork(ctx, db, rootPath, fDiff, fChange); err != nil {
+	// 8) Accept: pending + frozen target basis (one tx) → atomic DB mutation →
+	//    projection rebuild from the pinned target basis → clean (promotes target basis).
+	if err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis); err != nil {
 		globallog.Log.Errorf("acceptWork 실패: %v", err)
 		return SyncResult{}, err
 	}
@@ -101,4 +210,22 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	res.Outcome = OutcomeAcceptedUpdate
 	res.Reconcile = reconciled
 	return res, nil
+}
+
+// folderPaths projects folder rows to their paths for rule-basis preflight.
+func folderPaths(folders []Folder) []string {
+	paths := make([]string, 0, len(folders))
+	for _, f := range folders {
+		paths = append(paths, f.Path)
+	}
+	return paths
+}
+
+// shortRev abbreviates a revision id for human-readable HOLD reasons.
+func shortRev(rev string) string {
+	const n = 12
+	if len(rev) > n {
+		return rev[:n]
+	}
+	return rev
 }
