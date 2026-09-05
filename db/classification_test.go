@@ -541,6 +541,30 @@ func TestI4F_MigrationIgnoresExcludedFolder(t *testing.T) {
 	}
 }
 
+// TestI4F_UncoveredDiffFolderGuard (adversarial regression, round 3): the freeze→diff
+// TOCTOU guard flags an added/modified folder whose basis was not frozen (it appeared
+// after the freeze) and exempts removals and covered folders.
+func TestI4F_UncoveredDiffFolderGuard(t *testing.T) {
+	frozen := map[string]folderBasis{"/src/a": {Path: "/src/a"}}
+
+	if got := uncoveredDiffFolder([]FolderDiff{{ChangeType: "added", Path: "/src/b"}}, nil, frozen); got != "/src/b" {
+		t.Fatalf("added folder not in frozen must be flagged, got %q", got)
+	}
+	if got := uncoveredDiffFolder(nil, []FileChange{{ChangeType: "added", Path: "/src/c"}}, frozen); got != "/src/c" {
+		t.Fatalf("file change in an unfrozen folder must be flagged, got %q", got)
+	}
+	if got := uncoveredDiffFolder(
+		[]FolderDiff{{ChangeType: "removed", Path: "/src/gone"}},
+		[]FileChange{{ChangeType: "removed", Path: "/src/gone"}}, frozen); got != "" {
+		t.Fatalf("removals must be exempt, got %q", got)
+	}
+	if got := uncoveredDiffFolder(
+		[]FolderDiff{{ChangeType: "modified", Path: "/src/a"}},
+		[]FileChange{{ChangeType: "added", Path: "/src/a"}}, frozen); got != "" {
+		t.Fatalf("covered (frozen) folder must not be flagged, got %q", got)
+	}
+}
+
 // TestI4F_EmptyRootPendingReconciles (adversarial regression): a crash after
 // beginPendingWithBasis during an EMPTY-root acceptance (zero folders → zero basis) must
 // reconcile to a clean empty snapshot on restart, not HOLD forever on "zero bases".

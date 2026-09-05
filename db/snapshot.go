@@ -206,7 +206,22 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		}
 	}
 
-	// 7) Accept as a crash-recoverable unit. The frozen target basis was preflighted once
+	// 7) Revalidate the folder set: DiffFolders is a fresh disk enumeration that ran after
+	//    the basis was frozen. If a folder appeared in that window, the diff would add it
+	//    to the DB while the frozen basis (and inScope) omit it — leaving it projected
+	//    without a recoverable rule basis. HOLD and retry next sync (which re-freezes the
+	//    current set) rather than accepting a folder whose basis was never frozen. Removals
+	//    need no basis, so they are exempt.
+	if missing := uncoveredDiffFolder(fDiff, fChange, frozen); missing != "" {
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reason = fmt.Sprintf("source folder set changed during sync (folder %s appeared after basis freeze); retry", missing)
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
+	}
+
+	// 8) Accept as a crash-recoverable unit. The frozen target basis was preflighted once
 	//    above; if any in-scope folder's rule was missing/invalid, HOLD BEFORE any DB
 	//    mutation and retain the previous accepted DB + projection together (TDI-I4F §5).
 	if !allBasesOK {

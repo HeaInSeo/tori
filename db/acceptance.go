@@ -718,16 +718,22 @@ func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []Folder
 			return err
 		}
 	}
-	// acceptWork projects the accepted DB it just wrote to match the confirmed source,
-	// so the rebuild is expected to be complete; the completeness flag is consumed by
-	// the reconcile path (not here), where a vanished/out-of-scope folder must defer the
-	// clean mark. The DB has just been pruned to the in-scope set, so filtering here is a
-	// no-op in the normal path.
-	if _, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope); err != nil {
+	// acceptWork projects the accepted DB it just wrote to match the confirmed source, so
+	// the rebuild is normally complete. If it is NOT — a folder vanished or fell out of
+	// scope between the freeze/diff and this projection — do NOT mark the target clean
+	// while the projection omits an accepted DB row (mirrors reconcile's defer): leave it
+	// pending so the next SyncFolders run reconciles/prunes and converges, rather than
+	// promoting a target whose projection is missing a folder.
+	complete, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
+	if err != nil {
 		return err
 	}
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
 		return err
+	}
+	if !complete {
+		logger.Warn("acceptWork: projection omitted an accepted folder; leaving pending for the next reconcile to converge")
+		return nil
 	}
 	return commitClean(ctx, db, target)
 }

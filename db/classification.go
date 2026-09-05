@@ -183,6 +183,32 @@ func freezeDiskBases(folderPaths []string, origin string) (map[string]folderBasi
 	return bases, allOK, firstErr
 }
 
+// uncoveredDiffFolder returns the path of the first added/modified folder in the diff
+// whose rule basis was not frozen — i.e. it appeared on disk AFTER the basis was frozen,
+// so the diff (a later disk enumeration) would add it to the accepted DB without a
+// recoverable rule basis. Returns "" when every mutated (non-removal) folder is covered.
+// Removals need no basis and are exempt. This guards the freeze→diff TOCTOU: the caller
+// HOLDs and retries next sync (which re-freezes the current folder set).
+func uncoveredDiffFolder(fDiff []FolderDiff, fChange []FileChange, frozen map[string]folderBasis) string {
+	for i := range fDiff {
+		if fDiff[i].ChangeType == "removed" {
+			continue
+		}
+		if _, ok := frozen[fDiff[i].Path]; !ok {
+			return fDiff[i].Path
+		}
+	}
+	for i := range fChange {
+		if fChange[i].ChangeType == "removed" {
+			continue
+		}
+		if _, ok := frozen[fChange[i].Path]; !ok {
+			return fChange[i].Path
+		}
+	}
+	return ""
+}
+
 // basesSlice returns the frozen bases for the given paths, in the paths' order, skipping
 // any path that failed to freeze (absent from the map).
 func basesSlice(frozen map[string]folderBasis, paths []string) []folderBasis {
