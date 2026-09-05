@@ -1230,3 +1230,40 @@ func TestI4F_DriftRestoreIncompletePending(t *testing.T) {
 		t.Fatalf("drift-restore with an incomplete rebuild must be incomplete-pending, got %v (%s)", res.Outcome, res.Reason)
 	}
 }
+
+// TestI4F_IncompleteReconcileWithDriftIsIncompletePending (adversarial regression, round 11):
+// when a pending reconcile is incomplete (a folder vanished) AND another in-scope folder has
+// drift, the incomplete state must take precedence — SyncFolders returns OutcomeIncompletePending,
+// not a drift reclassify-hold that would mask the incomplete projection and never converge.
+func TestI4F_IncompleteReconcileWithDriftIsIncompletePending(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	aBasis, okA := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	bBasis, okB := acceptedBasis(t, ctx, db, acceptedVer, dirB)
+	if !okA || !okB {
+		t.Fatal("expected a and b accepted bases after baseline")
+	}
+
+	// Simulate a crashed accept (pending target pinning both a and b), then a drifts R1->R2
+	// and b vanishes from disk.
+	if _, err := beginPendingWithBasis(ctx, db, []folderBasis{aBasis, bBasis}); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+	setRule(t, dirA, ruleJSONR2)
+	if err := os.RemoveAll(dirB); err != nil {
+		t.Fatalf("remove b dir: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeIncompletePending {
+		t.Fatalf("incomplete reconcile + drift must be incomplete-pending, got %v (%s)", res.Outcome, res.Reason)
+	}
+}

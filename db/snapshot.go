@@ -143,6 +143,21 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer, inScope, frozen); dErr != nil {
 		return SyncResult{}, dErr
 	} else if driftFolder != "" {
+		// An incomplete prior reconcile this run leaves the snapshot pending (a vanished
+		// folder was omitted from the projection). That incomplete state takes precedence over
+		// a drift HOLD: reporting reclassify-hold here would mask an incomplete projection and
+		// (with drift) never converge, since the drift branch returns before the diff/prune
+		// path. Surface incomplete-pending instead; when the folder returns, the next sync's
+		// reconcile completes and drift is re-evaluated properly. (A no-drift incomplete
+		// reconcile never reaches this branch and still converges via the diff/prune path.)
+		if st, sErr := readAcceptanceState(ctx, db); sErr != nil {
+			return SyncResult{}, sErr
+		} else if st == acceptancePending {
+			res.Outcome = OutcomeIncompletePending
+			res.Reason = fmt.Sprintf("pending reconciliation incomplete (an accepted folder is temporarily absent) while %s has classification-semantics drift; retry to converge", driftFolder)
+			globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+			return res, nil
+		}
 		res.Outcome = OutcomeReclassifyHold
 		if fromRev == "" {
 			// Unverifiable basis: the folder has no recoverable accepted basis, so the
