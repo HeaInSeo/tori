@@ -26,6 +26,21 @@ func SaveFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	}
 	wasEmpty := len(existing) == 0
 
+	// TDI-I4F v0.3 (F1): durably record a fresh seed's acceptance provenance BEFORE the
+	// first seed row is written, not after. Ordering the SEED_ONLY marker strictly ahead of
+	// any StoreFilesFolderInfo commit guarantees the invariant "seed rows exist ⇒ provenance
+	// is set": an interrupted seed can then only leave (provenance=SEED_ONLY, 0 or partial
+	// rows), which resolveProvenanceForSync classifies SEED_ONLY and the accept path
+	// bootstraps — never (rows, no provenance), which would wedge into UNKNOWN_LEGACY/HOLD
+	// with no way to repair via a re-seed (wasEmpty would then be false). Only a true fresh
+	// seed (empty DB) records it, and only when not already set (never clobbers
+	// ACCEPTED/UNKNOWN_LEGACY).
+	if wasEmpty {
+		if err := recordSeedProvenanceIfUnset(ctx, db); err != nil {
+			return fmt.Errorf("failed to record seed provenance: %w", err)
+		}
+	}
+
 	// 각 서브 Folder 에 대해 파일 정보를 DB에 삽입
 	for _, folder := range folders {
 		err = StoreFilesFolderInfo(ctx, db, folder.Path, filesExclusions)
@@ -37,15 +52,6 @@ func SaveFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 초기 스냅샷을 즉시 source-continuity witness 로 보호한다 (부트스트랩 시에만 생성).
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
 		return fmt.Errorf("failed to establish source witness: %w", err)
-	}
-
-	// TDI-I4F v0.3 (F1): durably record a fresh seed's acceptance provenance so a later
-	// sync can distinguish it from a legacy accepted inventory. Only for a true fresh seed
-	// (empty DB before this call) and only when provenance is not already set.
-	if wasEmpty {
-		if err := recordSeedProvenanceIfUnset(ctx, db); err != nil {
-			return fmt.Errorf("failed to record seed provenance: %w", err)
-		}
 	}
 
 	return nil

@@ -895,3 +895,36 @@ func TestI4F_T19_InScopeUnfreezableRuleNoBasisHolds(t *testing.T) {
 		t.Fatalf("expected reclassify-hold for in-scope unfreezable rule + no basis, got %v (%s)", res.Outcome, res.Reason)
 	}
 }
+
+// TestI4F_InterruptedSeedIsResumable (adversarial regression, round 6): SaveFolders records
+// SEED_ONLY BEFORE the first seed row, so an interrupted seed can only leave
+// (provenance=SEED_ONLY, rows, no datablock) — which must remain resumable (bootstrap +
+// accept), never wedge into UNKNOWN_LEGACY/HOLD. Before the fix, provenance was written
+// AFTER the rows, so a crash mid-seed left (rows, no provenance) which the next sync
+// classified UNKNOWN_LEGACY and HELD, unrepairable by a re-seed (wasEmpty then false).
+func TestI4F_InterruptedSeedIsResumable(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+
+	// Reproduce the state an interrupted seed now leaves: the SEED_ONLY marker is durable
+	// (written first) and folder rows are present, but no projection was produced yet.
+	if err := setProvenanceTx(ctx, db, provenanceSeedOnly); err != nil {
+		t.Fatalf("seed provenance: %v", err)
+	}
+	if err := StoreFilesFolderInfo(ctx, db, dir, acceptanceExclusions); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("interrupted seed must resume and accept, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if p, ok, _ := getProvenance(ctx, db); !ok || p != provenanceAccepted {
+		t.Fatalf("expected ACCEPTED after resume, got ok=%v p=%q", ok, p)
+	}
+}
