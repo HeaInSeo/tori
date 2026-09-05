@@ -928,3 +928,80 @@ func TestI4F_InterruptedSeedIsResumable(t *testing.T) {
 		t.Fatalf("expected ACCEPTED after resume, got ok=%v p=%q", ok, p)
 	}
 }
+
+// TestI4F_AcceptWorkIncompleteLeavesPending (adversarial regression, round 7): if an
+// accepted folder vanishes between diff observation and the projection rebuild, acceptWork
+// must report complete=false and leave the snapshot PENDING (not promote to clean). Before
+// the fix acceptWork returned a bare nil error, so SyncFolders reported an accepted update
+// for an inconsistent, still-pending snapshot; it now propagates the incomplete signal so
+// the caller HOLDs.
+func TestI4F_AcceptWorkIncompleteLeavesPending(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	aBasis, ok := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	if !ok {
+		t.Fatal("expected a's accepted basis after baseline")
+	}
+
+	// a is still an accepted DB row and in scope, but its directory is gone when acceptWork
+	// rebuilds the projection (the vanish-after-diff race).
+	if err := os.RemoveAll(dirA); err != nil {
+		t.Fatalf("remove dir: %v", err)
+	}
+	complete, err := acceptWork(ctx, db, root, nil, nil, []folderBasis{aBasis}, map[string]struct{}{dirA: {}})
+	if err != nil {
+		t.Fatalf("acceptWork: %v", err)
+	}
+	if complete {
+		t.Fatal("acceptWork must report incomplete when an accepted folder vanished before projection")
+	}
+	if st, _ := readAcceptanceState(ctx, db); st != acceptancePending {
+		t.Fatalf("incomplete accept must leave the snapshot pending, got %q", st)
+	}
+}
+
+// TestI4F_MigrationRejectsPhantomBlock (adversarial regression, round 7): legacy migration
+// must reject a stored datablock.pb that contains a block mapping to no accepted DB folder.
+// A one-way subset match would declare reproduction successful and adopt current rules,
+// leaving the phantom block published indefinitely; exact reproduction requires no extras
+// beyond accepted folders (in scope or being pruned).
+func TestI4F_MigrationRejectsPhantomBlock(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+
+	// Legacy DB (no provenance, no pinned basis) whose stored projection has a phantom block.
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM snapshot_meta WHERE key = ?", metaKeyAcceptanceProvenance); err != nil {
+		t.Fatalf("clear provenance: %v", err)
+	}
+	dbPath := filepath.Join(root, "datablock.pb")
+	dbk, err := protoio.LoadDataBlock(dbPath)
+	if err != nil {
+		t.Fatalf("load datablock: %v", err)
+	}
+	dbk.Blocks = append(dbk.GetBlocks(), &pb.FileBlock{BlockId: filepath.Join(root, "ghost"), ColumnHeaders: []string{"x"}})
+	if err := protoio.SaveMessage(dbPath, dbk, 0o600); err != nil {
+		t.Fatalf("save datablock: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold for a datablock with a phantom block, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if _, ok := acceptedBasis(t, ctx, db, acceptedVer, dir); ok {
+		t.Fatal("migration adopted a basis despite an unreproducible (phantom-block) projection")
+	}
+}

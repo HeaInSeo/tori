@@ -240,13 +240,26 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 
 	// 8) Accept: pending + frozen target basis (one tx) → atomic DB mutation →
 	//    projection rebuild from the pinned target basis → clean (promotes target basis).
-	if err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis, inScope); err != nil {
+	complete, err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis, inScope)
+	if err != nil {
 		globallog.Log.Errorf("acceptWork 실패: %v", err)
 		return SyncResult{}, err
 	}
 	if ctx.Err() != nil {
 		globallog.Log.Warnf("SyncFolders 완료 이후 컨텍스트 취소 감지 (%v)", ctx.Err())
 		return SyncResult{}, ctx.Err()
+	}
+	if !complete {
+		// A folder vanished/left scope between the freeze/diff and the projection rebuild, so
+		// acceptWork left the snapshot pending (DB advanced but projection omits an accepted
+		// row). Do NOT report an accepted update for an inconsistent, still-pending snapshot:
+		// surface a HOLD so the caller retries; the next sync reconciles/prunes and converges.
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reason = "accepted DB advanced but projection is incomplete (a folder vanished/left scope mid-accept); retry to converge"
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
 	}
 
 	res.Outcome = OutcomeAcceptedUpdate

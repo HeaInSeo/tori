@@ -713,16 +713,16 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 // per-folder classification basis for every folder that will participate in the accepted
 // projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
 // invalid rule HOLDs before any DB row advances (TDI-I4F §5).
-func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, inScope map[string]struct{}) error {
+func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, inScope map[string]struct{}) (complete bool, err error) {
 	target, err := beginPendingWithBasis(ctx, db, targetBasis)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(diffs) > 0 || len(changes) > 0 {
 		if err := UpdateDB(ctx, db, diffs, changes); err != nil {
 			// The mutation is atomic (single tx); on failure the DB is unchanged.
 			// The pending marker + target basis remain so the next run reconciles safely.
-			return err
+			return false, err
 		}
 	}
 	// acceptWork projects the accepted DB it just wrote to match the confirmed source, so
@@ -730,17 +730,18 @@ func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []Folder
 	// scope between the freeze/diff and this projection — do NOT mark the target clean
 	// while the projection omits an accepted DB row (mirrors reconcile's defer): leave it
 	// pending so the next SyncFolders run reconciles/prunes and converges, rather than
-	// promoting a target whose projection is missing a folder.
-	complete, err := regenerateProjectionFromDB(ctx, db, rootPath, inScope)
+	// promoting a target whose projection is missing a folder. The caller must NOT report an
+	// accepted update for this incomplete outcome (it returns complete=false).
+	complete, err = regenerateProjectionFromDB(ctx, db, rootPath, inScope)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
-		return err
+		return false, err
 	}
 	if !complete {
 		logger.Warn("acceptWork: projection omitted an accepted folder; leaving pending for the next reconcile to converge")
-		return nil
+		return false, nil
 	}
-	return commitClean(ctx, db, target)
+	return true, commitClean(ctx, db, target)
 }

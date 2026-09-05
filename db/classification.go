@@ -423,8 +423,14 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		})
 	}
 
-	// Verify the candidate basis reproduces the existing accepted projection exactly.
-	if ok, why := candidateReproducesAcceptedProjection(rootPath, expectedBlocks); !ok {
+	// Verify the candidate basis reproduces the existing accepted projection exactly. The
+	// block-id set of every accepted DB folder (in scope or not) bounds legitimate extras:
+	// a stored block outside it is a phantom/stale block and defeats exact reproduction.
+	acceptedFolderIDs := make(map[string]struct{}, len(folders))
+	for _, f := range folders {
+		acceptedFolderIDs[f.Path] = struct{}{}
+	}
+	if ok, why := candidateReproducesAcceptedProjection(rootPath, expectedBlocks, acceptedFolderIDs); !ok {
 		return true, "legacy migration HOLD: current rules do not reproduce the accepted projection (" + why + "); refusing to adopt", nil
 	}
 
@@ -462,7 +468,15 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 // FileBlock from candidate rules matches the FileBlocks stored in the accepted
 // datablock.pb. DataBlock.UpdatedAt is ignored (it changes every generation); only the
 // per-folder FileBlock content (block id, headers, rows) must match.
-func candidateReproducesAcceptedProjection(rootPath string, expected map[string]*pb.FileBlock) (bool, string) {
+//
+// acceptedFolderIDs is the block-id set of EVERY accepted DB folder (in scope or not; block
+// id == folder path). It bounds which stored blocks may legitimately be "extra" beyond the
+// in-scope `expected` set: a stored block for an accepted folder currently excluded/removed
+// is being pruned by the diff path and need not match. But a stored block whose id maps to
+// NO accepted DB folder is a phantom/stale block — the stored projection then does not
+// exactly reflect the accepted DB, so "reproduction" is not exact and migration must NOT
+// adopt (else the phantom block stays published indefinitely).
+func candidateReproducesAcceptedProjection(rootPath string, expected map[string]*pb.FileBlock, acceptedFolderIDs map[string]struct{}) (bool, string) {
 	datablockPath := filepath.Join(rootPath, "datablock.pb")
 	if _, statErr := os.Stat(datablockPath); statErr != nil {
 		return false, "accepted datablock.pb not present"
@@ -476,9 +490,7 @@ func candidateReproducesAcceptedProjection(rootPath string, expected map[string]
 		storedBlocks[b.GetBlockId()] = b
 	}
 	// Subset match: every in-scope (expected) folder's regenerated block must match the
-	// stored accepted block. Stored blocks for folders no longer in scope (excluded or
-	// removed) are intentionally not required to match — they are being pruned by the diff
-	// path and their basis is not adopted.
+	// stored accepted block.
 	for id, want := range expected {
 		got, ok := storedBlocks[id]
 		if !ok {
@@ -486,6 +498,15 @@ func candidateReproducesAcceptedProjection(rootPath string, expected map[string]
 		}
 		if !proto.Equal(want, got) {
 			return false, fmt.Sprintf("block %s content differs", id)
+		}
+	}
+	// Reject phantom extras: any stored block whose id is not a currently-accepted DB folder
+	// is not reproducible from the accepted DB, so the projection is not an exact reflection
+	// of it. Stored blocks for accepted-but-out-of-scope folders (id present in
+	// acceptedFolderIDs) are allowed — they are pruned by the diff path.
+	for id := range storedBlocks {
+		if _, isAccepted := acceptedFolderIDs[id]; !isAccepted {
+			return false, fmt.Sprintf("stored block %s maps to no accepted folder (stale/phantom)", id)
 		}
 	}
 	return true, ""
