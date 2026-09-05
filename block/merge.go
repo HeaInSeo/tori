@@ -5,6 +5,7 @@ import (
 
 	"github.com/HeaInSeo/tori/protoio"
 	pb "github.com/HeaInSeo/tori/protos/ichthys/v1"
+	"github.com/HeaInSeo/tori/rules"
 )
 
 // GenerateFBs folderFiles 를 받아서 FileBlock 객체를 생성하고, 바이너리 protobuf 파일로 저장
@@ -23,6 +24,39 @@ func GenerateFBs(folderFiles [][]string) ([]*pb.FileBlock, error) {
 		}
 
 		fb, err := GenerateFileBlock(folderPath, fileNames)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate file block for folder %s: %w", folderPath, err)
+		}
+
+		fileBlocks = append(fileBlocks, fb)
+	}
+	return fileBlocks, nil
+}
+
+// GenerateFBsWithRules is GenerateFBs but resolves each folder's RuleSet through the
+// ruleFor callback (a FROZEN, pinned classification basis) instead of reading disk
+// rule.json. This is the TDI-I4F projection path: an accepted/target snapshot is always
+// rebuilt against the semantics it was pinned under, never against a later on-disk rule.
+func GenerateFBsWithRules(folderFiles [][]string, ruleFor func(folderPath string) (rules.RuleSet, error)) ([]*pb.FileBlock, error) {
+	var fileBlocks []*pb.FileBlock
+
+	for _, ff := range folderFiles {
+		if len(ff) == 0 {
+			continue
+		}
+		folderPath := ff[0]
+
+		var fileNames []string
+		if len(ff) > 1 {
+			fileNames = ff[1:]
+		}
+
+		ruleSet, err := ruleFor(folderPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve frozen rule basis for folder %s: %w", folderPath, err)
+		}
+
+		fb, err := GenerateFileBlockWithRuleSet(folderPath, fileNames, ruleSet)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate file block for folder %s: %w", folderPath, err)
 		}

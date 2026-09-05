@@ -61,13 +61,27 @@ func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
 }
 
 // GenerateFileBlock 일단 이름 고침. filePath 는 rule.josn 이 있는 위치이자 fileblock.csv, invalid_files, *.pb 파일 등이 가 저장될 위치.
+//
+// It loads the rule set from disk (filePath/rule.json) and delegates to
+// GenerateFileBlockWithRuleSet. Acceptance/reconcile paths that must project against a
+// FROZEN classification basis (TDI-I4F) call GenerateFileBlockWithRuleSet directly
+// instead, so a mutated on-disk rule.json can never silently reinterpret an accepted
+// snapshot.
 func GenerateFileBlock(filePath string, files []string) (*pb.FileBlock, error) {
 	// Load the rule set
 	ruleSet, err := rules.LoadRuleSetFromFile(filePath) // 이 메서드에서 filepath 의 검증을 해줌.
 	if err != nil {
 		return nil, fmt.Errorf("failed to load rule set: %w", err)
 	}
+	return GenerateFileBlockWithRuleSet(filePath, files, ruleSet)
+}
 
+// GenerateFileBlockWithRuleSet is GenerateFileBlock with an explicit, already-frozen
+// RuleSet: it does NOT read filePath/rule.json for classification. filePath is still
+// the location where the compatibility artifacts (fileblock.csv, invalid_files,
+// <base>files.pb) are written. This is the seam TDI-I4F uses so projection consumes a
+// pinned classification basis rather than the mutable on-disk rule.
+func GenerateFileBlockWithRuleSet(filePath string, files []string, ruleSet rules.RuleSet) (*pb.FileBlock, error) {
 	// Validate the rule set
 	if !rules.IsValidRuleSet(ruleSet) {
 		return nil, fmt.Errorf("rule set has conflicts or unused parts")
@@ -100,4 +114,22 @@ func GenerateFileBlock(filePath string, files []string) (*pb.FileBlock, error) {
 	}
 
 	return fbd, nil
+}
+
+// ProjectFileBlock classifies files under ruleSet into a FileBlock WITHOUT writing any
+// artifact to disk (no csv, no invalid_files, no *.pb). It is a pure, side-effect-free
+// projection used for read-only verification — e.g. the TDI-I4F legacy-migration check
+// that a candidate rule basis reproduces the existing accepted compatibility projection
+// before it may be adopted. blockID must match the accepted projection's block id
+// (the folder path) so the comparison is apples-to-apples.
+func ProjectFileBlock(blockID string, files []string, ruleSet rules.RuleSet) (*pb.FileBlock, error) {
+	if !rules.IsValidRuleSet(ruleSet) {
+		return nil, fmt.Errorf("rule set has conflicts or unused parts")
+	}
+	resultMap, err := rules.GroupFiles(files, ruleSet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to blockify files: %w", err)
+	}
+	validRows, _ := rules.FilterGroupsByHeaders(resultMap, ruleSet.Header)
+	return ConvertMapToFileBlock(validRows, ruleSet.Header, blockID), nil
 }
