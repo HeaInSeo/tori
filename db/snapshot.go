@@ -68,10 +68,22 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	}
 	frozen, allBasesOK, freezeErr := freezeDiskBases(folderPaths(targetFolders), originNative)
 
-	// 2) TDI-I4F pending-basis guard: a pending recovery must have a provable frozen
-	//    classification basis. A pre-I4F pending state (or one whose basis was lost) has
-	//    none, so reconciling would rebuild from the mutable on-disk rule — HOLD
-	//    fail-closed instead of guessing historical semantics (TDI-I4F §7/§9).
+	// 2) TDI-I4F v0.3 (F1): resolve the durable acceptance provenance. A pre-v0.3 DB with
+	//    inventory but no recorded provenance is initialized to UNKNOWN_LEGACY (fail-closed);
+	//    it is never inferred to be a fresh seed from accepted_version / datablock presence /
+	//    row count. This provenance drives the legacy-migration branch below.
+	provenance, err := resolveProvenanceForSync(ctx, db)
+	if err != nil {
+		return SyncResult{}, err
+	}
+
+	// 3) TDI-I4F v0.3 (F2) pending-basis guard: a pending recovery must have a provable
+	//    frozen basis for EVERY in-scope accepted folder it will rebuild. Validate this
+	//    per-folder — not by aggregate basis counts, which a crash mid-scoped-migration
+	//    (target pinned only a subset) could bypass — BEFORE reconcile, so a missing basis
+	//    surfaces a recoverable reclassification HOLD instead of a permanent
+	//    ErrFrozenBasisUnavailable wedge inside reconcile. An empty in-scope inventory needs
+	//    no basis and converges (empty-root pending initial acceptance).
 	state, err := readAcceptanceState(ctx, db)
 	if err != nil {
 		return SyncResult{}, err
@@ -85,29 +97,13 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		if aErr != nil {
 			return SyncResult{}, aErr
 		}
-		nTarget, cErr := countSemanticsAtVersion(ctx, db, targetVer)
-		if cErr != nil {
-			return SyncResult{}, cErr
-		}
-		nAccepted, cErr := countSemanticsAtVersion(ctx, db, acceptedVer)
-		if cErr != nil {
-			return SyncResult{}, cErr
-		}
-		if nTarget == 0 && nAccepted == 0 {
-			// Zero pinned bases is only a violation when there is accepted inventory to
-			// protect. A pending INITIAL acceptance of an empty root legitimately pins no
-			// basis (zero folders need none); reconcile must regenerate the empty
-			// projection and converge rather than HOLD forever.
-			folders, fErr := GetFoldersFromDB(db)
-			if fErr != nil {
-				return SyncResult{}, fErr
-			}
-			if len(folders) > 0 {
-				res.Outcome = OutcomeReclassifyHold
-				res.Reason = "pending recovery without a provable frozen classification basis; HOLD (re-bootstrap/reclassification required)"
-				globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
-				return res, nil
-			}
+		if hold, missing, hErr := pendingBasisHold(ctx, db, inScope, targetVer, acceptedVer); hErr != nil {
+			return SyncResult{}, hErr
+		} else if hold {
+			res.Outcome = OutcomeReclassifyHold
+			res.Reason = fmt.Sprintf("pending recovery without a provable frozen classification basis for in-scope folder %s; HOLD (reclassification/re-bootstrap required)", missing)
+			globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+			return res, nil
 		}
 	}
 
@@ -131,7 +127,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 4) TDI-I4F legacy migration bootstrap: a pre-I4F clean snapshot has accepted rows
 	//    but no pinned classification basis. Adopt the current rules as migration-time
 	//    semantics ONLY if they reproduce the accepted projection; otherwise HOLD.
-	if held, reason, mErr := migrateLegacyBasisIfNeeded(ctx, db, rootPath, acceptedVer, inScope, frozen); mErr != nil {
+	if held, reason, mErr := migrateLegacyBasisIfNeeded(ctx, db, rootPath, acceptedVer, provenance, inScope, frozen); mErr != nil {
 		return SyncResult{}, mErr
 	} else if held {
 		res.Outcome = OutcomeReclassifyHold
@@ -144,7 +140,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	//    not read as ordinary unchanged and must not adopt R2. Preserve accepted R1
 	//    (restoring the projection from the accepted frozen basis if datablock.pb is
 	//    missing) and HOLD.
-	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer, frozen); dErr != nil {
+	if driftFolder, fromRev, toRev, dErr := detectSemanticsDrift(ctx, db, acceptedVer, inScope, frozen); dErr != nil {
 		return SyncResult{}, dErr
 	} else if driftFolder != "" {
 		res.Outcome = OutcomeReclassifyHold

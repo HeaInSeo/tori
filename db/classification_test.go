@@ -730,3 +730,168 @@ func TestI4F_T14_LegacyMigrationEvidence(t *testing.T) {
 		}
 	})
 }
+
+// I4F-T15 (v0.3 F1): a pre-v0.3 legacy DB (inventory + no acceptance provenance) whose
+// projection is missing must HOLD, never bootstrap-adopt the current on-disk rules. This is
+// the exact silent-reinterpretation window Option B would have shipped: without durable
+// provenance the state is indistinguishable from a fresh seed.
+func TestI4F_T15_LegacyV0MissingProjectionHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+
+	// Simulate a genuine pre-v0.3 legacy DB: keep the accepted rows + accepted_version, but
+	// remove the pinned basis, the durable provenance, and the projection (datablock.pb).
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics"); err != nil {
+		t.Fatalf("wipe basis: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM snapshot_meta WHERE key = ?", metaKeyAcceptanceProvenance); err != nil {
+		t.Fatalf("clear provenance: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatalf("remove datablock: %v", err)
+	}
+	// A drifted disk rule makes the danger concrete, but even an unchanged rule must HOLD.
+	setRule(t, dir, ruleJSONR2)
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold for legacy-v0 + missing projection, got %v (%s)", res.Outcome, res.Reason)
+	}
+	// It was classified UNKNOWN_LEGACY (fail-closed), never SEED_ONLY, and adopted nothing.
+	if p, ok, _ := getProvenance(ctx, db); !ok || p != provenanceUnknownLegacy {
+		t.Fatalf("expected provenance UNKNOWN_LEGACY, got ok=%v p=%q", ok, p)
+	}
+	if _, ok := acceptedBasis(t, ctx, db, acceptedVer, dir); ok {
+		t.Fatal("legacy-v0 snapshot adopted a basis instead of holding")
+	}
+	if !folderExistsInDB(t, db, "f1") {
+		t.Fatal("legacy inventory was wiped instead of held")
+	}
+}
+
+// I4F-T16 (v0.3 F1): a genuinely fresh seed (SaveFolders on an empty DB) records SEED_ONLY
+// durably, and its first legitimate acceptance still succeeds and transitions to ACCEPTED.
+func TestI4F_T16_FreshSeedRecordsSeedOnlyAndAccepts(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+
+	if err := SaveFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+		t.Fatalf("SaveFolders: %v", err)
+	}
+	if p, ok, _ := getProvenance(ctx, db); !ok || p != provenanceSeedOnly {
+		t.Fatalf("fresh seed expected provenance SEED_ONLY, got ok=%v p=%q", ok, p)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("first acceptance of a fresh seed must succeed, got %v (%s)", res.Outcome, res.Reason)
+	}
+	if p, ok, _ := getProvenance(ctx, db); !ok || p != provenanceAccepted {
+		t.Fatalf("after first accept expected provenance ACCEPTED, got ok=%v p=%q", ok, p)
+	}
+}
+
+// I4F-T17 (v0.3 F1): a clean acceptance records ACCEPTED atomically with the clean/accepted
+// transition, so there is no reachable state where the snapshot is clean+accepted yet still
+// marked seed-only.
+func TestI4F_T17_CleanAcceptanceRecordsAcceptedAtomically(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "f1", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	state, err := readAcceptanceState(ctx, db)
+	if err != nil {
+		t.Fatalf("readAcceptanceState: %v", err)
+	}
+	av, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	p, ok, _ := getProvenance(ctx, db)
+	if state != acceptanceClean || av < 1 {
+		t.Fatalf("expected clean accepted_version>=1, got state=%q av=%d", state, av)
+	}
+	if !ok || p != provenanceAccepted {
+		t.Fatalf("clean+accepted must imply provenance ACCEPTED (atomic), got ok=%v p=%q", ok, p)
+	}
+}
+
+// I4F-T18 (v0.3 F2): a scoped pending crash that leaves an in-scope accepted folder with no
+// target and no accepted basis must surface a RECOVERABLE reclassification HOLD, not a
+// permanent ErrFrozenBasisUnavailable hard-error wedge; a retry stays a recoverable HOLD.
+func TestI4F_T18_ScopedPendingBasisLessFolderRecoverableHold(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer, _ := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+
+	// Crash mid-scoped-migration: a pending target that pinned only A; B (still in scope)
+	// has neither a target basis nor an accepted basis.
+	aBasis, ok := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	if !ok {
+		t.Fatal("expected a's accepted basis after baseline")
+	}
+	if _, err := beginPendingWithBasis(ctx, db, []folderBasis{aBasis}); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics WHERE folder_path = ?", dirB); err != nil {
+		t.Fatalf("drop b basis: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders must not hard-error: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected recoverable reclassify-hold, got %v (%s)", res.Outcome, res.Reason)
+	}
+	// No permanent wedge: a retry is still a recoverable HOLD, not a raw error.
+	res2, err2 := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err2 != nil {
+		t.Fatalf("retry must not hard-error (no permanent wedge): %v", err2)
+	}
+	if res2.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("retry expected recoverable reclassify-hold, got %v (%s)", res2.Outcome, res2.Reason)
+	}
+}
+
+// I4F-T19 (v0.3 F3): an in-scope accepted folder whose on-disk rule cannot be frozen
+// (missing/invalid) AND has no accepted basis must HOLD (unverifiable), not be skipped as
+// out-of-scope, and not fall through to ordinary "unchanged" or a raw projection error.
+func TestI4F_T19_InScopeUnfreezableRuleNoBasisHolds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	// B loses its accepted basis AND its on-disk rule becomes unparseable → freeze fails, so
+	// B is in scope but absent from `frozen` with no accepted basis to fall back on.
+	if _, err := db.ExecContext(ctx, "DELETE FROM classification_semantics WHERE folder_path = ?", dirB); err != nil {
+		t.Fatalf("drop b basis: %v", err)
+	}
+	setRule(t, dirB, "{ this is not valid rule json")
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders must not raw-error: %v", err)
+	}
+	if res.Outcome != OutcomeReclassifyHold {
+		t.Fatalf("expected reclassify-hold for in-scope unfreezable rule + no basis, got %v (%s)", res.Outcome, res.Reason)
+	}
+}

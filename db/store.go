@@ -17,6 +17,15 @@ func SaveFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return fmt.Errorf("failed to get subfolders from %s: %w", rootPath, err)
 	}
 
+	// TDI-I4F v0.3: a genuine fresh seed is one applied to an EMPTY DB. Capture that BEFORE
+	// seeding so a re-seed over an existing (possibly pre-v0.3 legacy) inventory is never
+	// mislabeled SEED_ONLY — that would reopen the F1 silent-reinterpretation hole.
+	existing, err := GetFoldersFromDB(db)
+	if err != nil {
+		return fmt.Errorf("failed to read existing inventory: %w", err)
+	}
+	wasEmpty := len(existing) == 0
+
 	// 각 서브 Folder 에 대해 파일 정보를 DB에 삽입
 	for _, folder := range folders {
 		err = StoreFilesFolderInfo(ctx, db, folder.Path, filesExclusions)
@@ -28,6 +37,15 @@ func SaveFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 초기 스냅샷을 즉시 source-continuity witness 로 보호한다 (부트스트랩 시에만 생성).
 	if err := establishWitnessIfBootstrap(ctx, db, rootPath); err != nil {
 		return fmt.Errorf("failed to establish source witness: %w", err)
+	}
+
+	// TDI-I4F v0.3 (F1): durably record a fresh seed's acceptance provenance so a later
+	// sync can distinguish it from a legacy accepted inventory. Only for a true fresh seed
+	// (empty DB before this call) and only when provenance is not already set.
+	if wasEmpty {
+		if err := recordSeedProvenanceIfUnset(ctx, db); err != nil {
+			return fmt.Errorf("failed to record seed provenance: %w", err)
+		}
 	}
 
 	return nil

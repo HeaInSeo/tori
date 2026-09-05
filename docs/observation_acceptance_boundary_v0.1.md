@@ -145,6 +145,43 @@ may stay ahead of a stale projection until the source re-confirms. This is
 self-healing (recoverable, not data loss); the HOLD reason should not be read as a
 guarantee that DB and projection are mutually consistent during that window.
 
+## Acceptance provenance (TDI-I4F v0.3)
+
+The frozen-basis projection above removes silent reinterpretation **when an accepted basis
+or accepted projection still exists**. It cannot, on its own, tell a genuinely fresh seed
+(rows staged by the `SaveFolders` command, never accepted) apart from a legacy inventory
+that *was* accepted before this feature but whose projection was later deleted — both look
+identical on disk (`accepted_version==0` is possible for either, `datablock.pb` absent,
+rows present, no pinned basis). Treating that state as a bootstrap would re-accept the
+legacy inventory under the current, possibly changed, `rule.json`.
+
+To close this, acceptance carries a **durable provenance** in `snapshot_meta`
+(`acceptance_provenance`) with three values:
+
+- `SEED_ONLY` — recorded when `SaveFolders` seeds an **empty** DB. A genuinely fresh seed
+  that has never been accepted; its first clean acceptance may legitimately bootstrap.
+- `ACCEPTED` — recorded **atomically with the clean/accepted transition** (in the same
+  `commitClean` transaction), and when a legacy migration proves its adopted basis. The
+  accepted snapshot + pinned basis are authoritative.
+- `UNKNOWN_LEGACY` — the fail-closed default for any pre-provenance DB that already holds
+  inventory. It is **never** inferred to be a fresh seed from `accepted_version`,
+  `datablock.pb` presence, row count, or a missing basis. It may become authoritative only
+  by reproducing an existing accepted projection exactly (migration-adopt); with no
+  reproducible projection/basis it **HOLDs** (`reclassify-hold`).
+
+Two related fail-closed refinements at the acceptance boundary:
+
+- **Pending recovery** validates a resolvable frozen basis **per in-scope accepted folder**
+  (target basis while pending, accepted basis as fallback), not by aggregate basis counts.
+  A crash mid-scoped-migration that pins only a subset therefore surfaces a *recoverable*
+  `reclassify-hold` rather than wedging reconcile on a permanent frozen-basis error.
+- A folder that is **in scope but whose on-disk rule cannot be frozen** (missing/invalid)
+  **and has no accepted basis** is surfaced as an unverifiable-basis `reclassify-hold`, not
+  skipped as if out-of-scope and not returned as ordinary `unchanged` or a raw error.
+
+This is provenance of acceptance-state history only — not a SourceID/Generation/publication
+authority.
+
 ## Known deferred item
 
 Projection generation (`rules`/`block`) emits its own side-files. `fileblock.csv`

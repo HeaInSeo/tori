@@ -639,6 +639,13 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 	if err := metaSet(ctx, tx, metaKeyAcceptanceState, acceptanceClean); err != nil {
 		return err
 	}
+	// TDI-I4F v0.3 (F1/T17): the first successful clean acceptance transitions provenance
+	// to ACCEPTED in the SAME crash-safe transaction that establishes the accepted/clean
+	// state, so a crash can never leave already-accepted data marked SEED_ONLY. Idempotent
+	// on later clean transitions.
+	if err := setProvenanceTx(ctx, tx, provenanceAccepted); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit clean transition: %w", err)
 	}

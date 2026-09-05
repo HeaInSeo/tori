@@ -231,17 +231,31 @@ func basesSlice(frozen map[string]folderBasis, paths []string) []folderBasis {
 //
 // frozen is the once-frozen in-scope disk basis (freezeDiskBases). Drift compares the
 // SAME frozen value that acceptance would pin, so no rule.json is re-read here (TOCTOU-
-// free). A folder absent from frozen — out of the current scope (excluded/removed) or
-// whose on-disk rule is unreadable/invalid — is not a drift signal: an out-of-scope
-// folder is pruned by the diff path, and an unreadable rule leaves the pinned accepted
-// basis authoritative for projection.
-func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, frozen map[string]folderBasis) (driftFolder, from, to string, err error) {
+// free). inScope is the full set of current target folders. Handling by case for each
+// accepted DB folder:
+//   - out of the current scope (not in inScope): pruned by the diff path → skip;
+//   - in scope, disk rule frozen (in frozen), pinned accepted basis present: compare
+//     revisions → drift if different;
+//   - in scope, disk rule frozen, NO pinned accepted basis: blind spot → HOLD;
+//   - in scope, disk rule NOT frozen (unreadable/invalid), pinned accepted basis present:
+//     the frozen accepted basis remains authoritative for projection → not drift, skip;
+//   - in scope, disk rule NOT frozen, NO pinned accepted basis (TDI-I4F v0.3 F3): the
+//     folder can be neither reproduced from an accepted basis nor re-frozen from disk →
+//     fail-closed unverifiable-basis HOLD (must not be skipped as if out-of-scope, and
+//     must not fall through to ordinary "unchanged" or a raw projection hard-error).
+func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, inScope map[string]struct{}, frozen map[string]folderBasis) (driftFolder, from, to string, err error) {
 	// Drift is defined relative to a pinned accepted basis. Skip only when NO basis is
 	// pinned at acceptedVer — a true bootstrap or SaveFolders-seeded rows awaiting their
 	// first accept, where the normal accept path will freeze and pin the basis. Do NOT key
 	// this on acceptedVer==0: accepted_version is advanced only by commitClean, so a legacy
 	// pre-I4F snapshot that migrateLegacyBasisIfNeeded adopts sits at version 0 yet HAS a
 	// pinned basis at v0 that must still be checked for drift.
+	//
+	// ORDERING DEPENDENCY: SyncFolders MUST run migrateLegacyBasisIfNeeded before this. When
+	// pinnedAtVer==0 with accepted inventory (not a SEED_ONLY bootstrap), migration has
+	// already HELD fail-closed (datablock missing → HOLD; present → reproduce-or-HOLD), so
+	// this early return is only reached for a genuine seed/bootstrap. If that ordering were
+	// ever inverted, an all-basis-lost accepted snapshot could slip past drift detection.
 	pinnedAtVer, err := countSemanticsAtVersion(ctx, db, acceptedVer)
 	if err != nil {
 		return "", "", "", err
@@ -254,24 +268,34 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, fr
 		return "", "", "", err
 	}
 	for _, f := range folders {
-		cand, inScopeFrozen := frozen[f.Path]
-		if !inScopeFrozen {
-			continue
+		if _, ok := inScope[f.Path]; !ok {
+			continue // out-of-scope: pruned by the diff path, not a drift signal
 		}
-		pinned, ok, gErr := getSemantics(ctx, db, acceptedVer, f.Path)
+		pinned, pinnedOK, gErr := getSemantics(ctx, db, acceptedVer, f.Path)
 		if gErr != nil {
 			return "", "", "", gErr
 		}
-		if !ok {
+		cand, frozenOK := frozen[f.Path]
+		if !frozenOK {
+			// In scope but its on-disk rule could not be frozen/read/validated.
+			if !pinnedOK {
+				// F3: no accepted basis to fall back on and no usable disk rule → the folder
+				// cannot be reproduced or re-frozen. Fail closed (from == "" marks "no
+				// recoverable basis") rather than skipping it as out-of-scope.
+				return f.Path, "", "", nil
+			}
+			// Has an accepted basis: projection rebuilds from it regardless of the
+			// unreadable disk rule, so this is not drift.
+			continue
+		}
+		if !pinnedOK {
 			// An IN-SCOPE accepted folder with no pinned accepted basis is a blind spot:
 			// migration has already run (pinnedCount>0) so it will not adopt it, and a
 			// later data update would otherwise pin whatever rule is on disk, silently
 			// reinterpreting the legacy inventory. This can arise if a prior scoped
 			// migration/accept committed only a subset and the folder was excluded then
 			// re-included before pruning. Fail closed: surface it as an unverifiable-basis
-			// reclassification HOLD (from == "" marks "no recoverable basis") rather than
-			// skipping it. (Out-of-scope folders are absent from `frozen` and skipped
-			// above; they are pruned by the diff path.)
+			// reclassification HOLD (from == "" marks "no recoverable basis").
 			return f.Path, "", cand.RevisionID, nil
 		}
 		if cand.RevisionID != pinned.RevisionID {
@@ -279,6 +303,43 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, fr
 		}
 	}
 	return "", "", "", nil
+}
+
+// pendingBasisHold implements TDI-I4F v0.3 (F2): per-in-scope-folder validation that a
+// pending recovery has a resolvable frozen basis for every accepted folder it must rebuild.
+// It replaces the previous aggregate basis-count guard, which a crash mid-scoped-migration
+// (target pins only a subset) could bypass, letting reconcile hit ErrFrozenBasisUnavailable
+// and wedge on every retry. Here a missing per-folder basis is surfaced as a recoverable
+// reclassification HOLD BEFORE reconcile runs, so no permanent hard-error wedge occurs.
+//
+// A folder is considered resolvable if a basis is pinned at either the target version
+// (consumed while pending) or the accepted version (fallback). Out-of-scope folders are
+// skipped: they are pruned by the normal diff/accept path (matching reconcile's
+// buildFolderFilesFromDB(inScope) skip), so an excluded/vanished folder never wedges
+// recovery. An empty in-scope inventory needs no basis and does not HOLD (an empty root's
+// pending initial acceptance reconciles to an empty projection).
+func pendingBasisHold(ctx context.Context, db *sql.DB, inScope map[string]struct{}, targetVer, acceptedVer int64) (hold bool, missing string, err error) {
+	folders, err := GetFoldersFromDB(db)
+	if err != nil {
+		return false, "", err
+	}
+	for _, f := range folders {
+		if _, ok := inScope[f.Path]; !ok {
+			continue
+		}
+		if _, tOK, gErr := getSemantics(ctx, db, targetVer, f.Path); gErr != nil {
+			return false, "", gErr
+		} else if tOK {
+			continue
+		}
+		if _, aOK, gErr := getSemantics(ctx, db, acceptedVer, f.Path); gErr != nil {
+			return false, "", gErr
+		} else if aOK {
+			continue
+		}
+		return true, f.Path, nil
+	}
+	return false, "", nil
 }
 
 // migrateLegacyBasisIfNeeded bootstraps a frozen accepted basis for a legacy pre-I4F
@@ -290,7 +351,7 @@ func detectSemanticsDrift(ctx context.Context, db *sql.DB, acceptedVer int64, fr
 // regenerated projection does not match the stored one, or the stored projection cannot
 // be read, it does NOT adopt and reports held=true so the caller HOLDs rather than
 // guessing historical semantics.
-func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string, acceptedVer int64, inScope map[string]struct{}, frozen map[string]folderBasis) (held bool, reason string, err error) {
+func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string, acceptedVer int64, provenance string, inScope map[string]struct{}, frozen map[string]folderBasis) (held bool, reason string, err error) {
 	folders, err := GetFoldersFromDB(db)
 	if err != nil {
 		return false, "", err
@@ -306,23 +367,22 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		return false, "", nil // already has a pinned accepted basis (post-I4F)
 	}
 
-	// Non-empty inventory with no pinned basis. Distinguish a true bootstrap from a
-	// legacy accepted snapshot by whether a prior accepted projection exists:
-	//   - datablock.pb ABSENT + accepted_version == 0: no clean acceptance was ever
-	//     committed (e.g. SaveFolders-seeded rows before the first accept) → bootstrap;
-	//     the normal accept path freezes and pins the basis.
-	//   - datablock.pb ABSENT + accepted_version >= 1: a prior acceptance existed but its
-	//     projection is gone → reproduction is UNVERIFIABLE → HOLD (never re-adopt the
-	//     current on-disk rules blindly, which would silently reclassify legacy data).
-	//   - datablock.pb PRESENT + no basis: a prior accepted projection exists → this is a
-	//     legacy pre-I4F snapshot; adopt current rules only if they reproduce it.
+	// Non-empty inventory with no pinned basis. TDI-I4F v0.3 (F1): the durable acceptance
+	// provenance — NOT accepted_version / datablock presence / row count — decides whether
+	// this inventory was ever accepted:
+	//   - SEED_ONLY: a genuinely fresh seed that has never been accepted → bootstrap; the
+	//     normal accept path freezes and pins the basis and marks ACCEPTED.
+	//   - ACCEPTED / UNKNOWN_LEGACY: this inventory is (or must be assumed to have been)
+	//     accepted, so the current rules may only be adopted if they reproduce the existing
+	//     accepted projection exactly. If datablock.pb is absent there is nothing to
+	//     reproduce against → HOLD (never re-adopt current on-disk rules blindly, which
+	//     would silently reclassify legacy data).
+	if provenance == provenanceSeedOnly {
+		return false, "", nil
+	}
 	_, statErr := os.Stat(filepath.Join(rootPath, "datablock.pb"))
-	datablockMissing := os.IsNotExist(statErr)
-	if datablockMissing {
-		if acceptedVer == 0 {
-			return false, "", nil
-		}
-		return true, "legacy migration HOLD: accepted snapshot has no pinned classification basis and datablock.pb is missing; historical semantics are unverifiable", nil
+	if os.IsNotExist(statErr) {
+		return true, "legacy migration HOLD: inventory has no pinned classification basis and datablock.pb is missing; historical semantics are unverifiable (provenance=" + provenance + ")", nil
 	}
 
 	// Legacy: derive a candidate basis from the once-frozen in-scope rules. Only IN-SCOPE
@@ -383,6 +443,12 @@ func migrateLegacyBasisIfNeeded(ctx context.Context, db *sql.DB, rootPath string
 		if pErr := pinSemanticsTx(ctx, tx, acceptedVer, b); pErr != nil {
 			return false, "", pErr
 		}
+	}
+	// The migration proved the inventory reproduces its accepted projection: it IS an
+	// accepted snapshot with a migration-adopted basis. Record provenance=ACCEPTED in the
+	// same transaction so a subsequent sync treats it as accepted (TDI-I4F v0.3 F1).
+	if pErr := setProvenanceTx(ctx, tx, provenanceAccepted); pErr != nil {
+		return false, "", pErr
 	}
 	if cErr := tx.Commit(); cErr != nil {
 		return false, "", fmt.Errorf("failed to commit migration basis: %w", cErr)
