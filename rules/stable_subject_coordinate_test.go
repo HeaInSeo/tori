@@ -103,6 +103,38 @@ func TestI11AStableSubjectCoordinate_UnderscoreJoinCollisionRemainsDistinct(t *t
 	}
 }
 
+func TestI11AStableSubjectCoordinate_GroupFilesPreservesLegacyUnderscoreCollision(t *testing.T) {
+	ruleSet := RuleSet{
+		Delimiter:   []string{"."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    RowRules{MatchParts: []int{0, 1}},
+		ColumnRules: ColumnRules{MatchParts: []int{2}},
+	}
+	files := []string{
+		"a_b.c.R1.fastq",
+		"a.b_c.R2.fastq",
+	}
+
+	legacy, err := GroupFiles(files, ruleSet)
+	if err != nil {
+		t.Fatalf("GroupFiles: %v", err)
+	}
+	structured, err := GroupFilesStructured(files, ruleSet)
+	if err != nil {
+		t.Fatalf("GroupFilesStructured: %v", err)
+	}
+
+	if len(legacy) != 1 {
+		t.Fatalf("legacy GroupFiles should keep historical underscore-joined row grouping, got %#v", legacy)
+	}
+	if legacy[0]["R1"] != "a_b.c.R1.fastq" || legacy[0]["R2"] != "a.b_c.R2.fastq" {
+		t.Fatalf("legacy GroupFiles row contents changed: %#v", legacy)
+	}
+	if len(structured.Groups) != 2 {
+		t.Fatalf("structured grouping should keep stable subjects distinct, got %#v", structured.Groups)
+	}
+}
+
 func TestI11AStableSubjectCoordinate_LegacyRowNumberMayDiffer(t *testing.T) {
 	ruleSet := i11aRuleSet()
 	base := []string{

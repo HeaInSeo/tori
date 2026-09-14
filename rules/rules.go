@@ -559,11 +559,67 @@ func LegacyGroupsFromStructured(grouping StructuredGroupingResult) map[int]map[s
 
 // GroupFiles 이름으로 바꿀 예정 파일 목록을 RuleSet 에 따라 행·열 구조로 묶어서 반환
 func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string, error) {
-	grouping, err := GroupFilesStructured(fileNames, ruleSet)
-	if err != nil {
-		return nil, err
+	rowMap := make(map[string]int) // rowKey → rowIndex
+	nextRowIdx := 0
+	result := make(map[int]map[string]string) // 최종 결과
+	type duplicateKey struct {
+		rowKey  string
+		roleKey string
 	}
-	return LegacyGroupsFromStructured(grouping), nil
+	duplicateMap := make(map[duplicateKey]*DuplicateReportEntry)
+	duplicateOrder := make([]duplicateKey, 0)
+
+	for _, fn := range fileNames {
+		parts := splitFileName(fn, ruleSet.Delimiter)
+
+		// 1) Row 키 생성
+		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
+		rowKey := strings.Join(coordinate.Components, "_")
+
+		if _, found := rowMap[rowKey]; !found {
+			rowMap[rowKey] = nextRowIdx
+			result[nextRowIdx] = make(map[string]string)
+			nextRowIdx++
+		}
+		rowIdx := rowMap[rowKey]
+
+		// 2) Column 키 생성
+		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
+
+		// 3) 결과에 추가
+		if existing, exists := result[rowIdx][colKey]; exists && existing != fn {
+			key := duplicateKey{rowKey: rowKey, roleKey: colKey}
+			entry, found := duplicateMap[key]
+			if !found {
+				entry = &DuplicateReportEntry{
+					ReasonCode: "duplicate_role_in_row",
+					RowKey:     rowKey,
+					RoleKey:    colKey,
+				}
+				duplicateMap[key] = entry
+				duplicateOrder = append(duplicateOrder, key)
+			}
+			entry.Candidates = appendUniqueString(entry.Candidates, existing)
+			entry.Candidates = appendUniqueString(entry.Candidates, fn)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, existing)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, fn)
+			continue
+		}
+		result[rowIdx][colKey] = fn
+	}
+
+	if len(duplicateOrder) > 0 {
+		entries := make([]DuplicateReportEntry, 0, len(duplicateOrder))
+		for _, key := range duplicateOrder {
+			entry := duplicateMap[key]
+			sort.Strings(entry.Candidates)
+			sort.Strings(entry.SourceFileNames)
+			entries = append(entries, *entry)
+		}
+		return nil, &DuplicateCollisionError{Entries: entries}
+	}
+
+	return result, nil
 }
 
 func appendUniqueString(items []string, value string) []string {
