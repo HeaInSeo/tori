@@ -21,13 +21,13 @@ func TestI11AStableSubjectCoordinate_FilePermutation(t *testing.T) {
 		"beta_L001_R2_001.fastq.gz",
 	}
 
-	first, err := GroupFilesStructured(files, ruleSet)
+	first, err := groupFilesStructured(files, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured first: %v", err)
+		t.Fatalf("groupFilesStructured first: %v", err)
 	}
-	second, err := GroupFilesStructured(permuted, ruleSet)
+	second, err := groupFilesStructured(permuted, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured second: %v", err)
+		t.Fatalf("groupFilesStructured second: %v", err)
 	}
 
 	if got, want := i11aCoordinateFacts(first), i11aCoordinateFacts(second); !reflect.DeepEqual(got, want) {
@@ -52,13 +52,13 @@ func TestI11AStableSubjectCoordinate_UnrelatedInsertionDoesNotChangeExistingCoor
 		"beta_L001_R2_001.fastq.gz",
 	}
 
-	baseGrouping, err := GroupFilesStructured(base, ruleSet)
+	baseGrouping, err := groupFilesStructured(base, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured base: %v", err)
+		t.Fatalf("groupFilesStructured base: %v", err)
 	}
-	insertedGrouping, err := GroupFilesStructured(withInsertedSubject, ruleSet)
+	insertedGrouping, err := groupFilesStructured(withInsertedSubject, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured inserted: %v", err)
+		t.Fatalf("groupFilesStructured inserted: %v", err)
 	}
 
 	baseFacts := i11aCoordinateFacts(baseGrouping)
@@ -82,23 +82,23 @@ func TestI11AStableSubjectCoordinate_UnderscoreJoinCollisionRemainsDistinct(t *t
 		"a.b_c.R1.fastq",
 	}
 
-	grouping, err := GroupFilesStructured(files, ruleSet)
+	grouping, err := groupFilesStructured(files, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured: %v", err)
+		t.Fatalf("groupFilesStructured: %v", err)
 	}
 
-	if len(grouping.Groups) != 2 {
-		t.Fatalf("expected underscore-colliding components to remain distinct, got %#v", grouping.Groups)
+	if len(grouping.groups) != 2 {
+		t.Fatalf("expected underscore-colliding components to remain distinct, got %#v", grouping.groups)
 	}
 	gotComponents := [][]string{
-		grouping.Groups[0].Coordinate.Components,
-		grouping.Groups[1].Coordinate.Components,
+		grouping.groups[0].coordinate.components,
+		grouping.groups[1].coordinate.components,
 	}
 	wantComponents := [][]string{{"a", "b_c"}, {"a_b", "c"}}
 	if !reflect.DeepEqual(gotComponents, wantComponents) {
 		t.Fatalf("unexpected structured coordinates:\ngot  %#v\nwant %#v", gotComponents, wantComponents)
 	}
-	if grouping.Groups[0].Coordinate.stableKey() == grouping.Groups[1].Coordinate.stableKey() {
+	if grouping.groups[0].coordinate.stableKey() == grouping.groups[1].coordinate.stableKey() {
 		t.Fatalf("stable keys collided for distinct structured coordinates")
 	}
 }
@@ -119,9 +119,9 @@ func TestI11AStableSubjectCoordinate_GroupFilesPreservesLegacyUnderscoreCollisio
 	if err != nil {
 		t.Fatalf("GroupFiles: %v", err)
 	}
-	structured, err := GroupFilesStructured(files, ruleSet)
+	structured, err := groupFilesStructured(files, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured: %v", err)
+		t.Fatalf("groupFilesStructured: %v", err)
 	}
 
 	if len(legacy) != 1 {
@@ -130,8 +130,8 @@ func TestI11AStableSubjectCoordinate_GroupFilesPreservesLegacyUnderscoreCollisio
 	if legacy[0]["R1"] != "a_b.c.R1.fastq" || legacy[0]["R2"] != "a.b_c.R2.fastq" {
 		t.Fatalf("legacy GroupFiles row contents changed: %#v", legacy)
 	}
-	if len(structured.Groups) != 2 {
-		t.Fatalf("structured grouping should keep stable subjects distinct, got %#v", structured.Groups)
+	if len(structured.groups) != 2 {
+		t.Fatalf("structured grouping should keep stable subjects distinct, got %#v", structured.groups)
 	}
 }
 
@@ -152,13 +152,13 @@ func TestI11AStableSubjectCoordinate_LegacyRowNumberMayDiffer(t *testing.T) {
 		"beta_L001_R2_001.fastq.gz",
 	}
 
-	baseGrouping, err := GroupFilesStructured(base, ruleSet)
+	baseGrouping, err := groupFilesStructured(base, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured base: %v", err)
+		t.Fatalf("groupFilesStructured base: %v", err)
 	}
-	priorGrouping, err := GroupFilesStructured(withPriorSubject, ruleSet)
+	priorGrouping, err := groupFilesStructured(withPriorSubject, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured prior: %v", err)
+		t.Fatalf("groupFilesStructured prior: %v", err)
 	}
 
 	baseAlpha, ok := i11aGroupByCoordinate(baseGrouping, "5:alpha|4:L001|3:001|5:fastq|2:gz")
@@ -169,10 +169,10 @@ func TestI11AStableSubjectCoordinate_LegacyRowNumberMayDiffer(t *testing.T) {
 	if !ok {
 		t.Fatalf("alpha coordinate missing from prior-subject grouping")
 	}
-	if baseAlpha.LegacyRowNumber == priorAlpha.LegacyRowNumber {
+	if baseAlpha.legacyRowNumber == priorAlpha.legacyRowNumber {
 		t.Fatalf("expected legacy row number to differ after prior subject insertion")
 	}
-	if !reflect.DeepEqual(baseAlpha.Coordinate.Components, priorAlpha.Coordinate.Components) {
+	if !reflect.DeepEqual(baseAlpha.coordinate.components, priorAlpha.coordinate.components) {
 		t.Fatalf("stable coordinate changed while legacy row number changed")
 	}
 }
@@ -190,11 +190,11 @@ func TestI11AStableSubjectCoordinate_LegacyCompatibilityAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GroupFiles: %v", err)
 	}
-	structured, err := GroupFilesStructured(files, ruleSet)
+	structured, err := groupFilesStructured(files, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured: %v", err)
+		t.Fatalf("groupFilesStructured: %v", err)
 	}
-	adapted := LegacyGroupsFromStructured(structured)
+	adapted := legacyGroupsFromStructured(structured)
 
 	if !reflect.DeepEqual(legacy, adapted) {
 		t.Fatalf("legacy adapter changed GroupFiles behavior:\ngot  %#v\nwant %#v", adapted, legacy)
@@ -212,18 +212,18 @@ func TestI11AStableSubjectCoordinate_EmptyCoordinateIsExplicit(t *testing.T) {
 		ColumnRules: ColumnRules{MatchParts: []int{1}},
 	}
 
-	grouping, err := GroupFilesStructured([]string{"alpha_R1.fastq.gz"}, ruleSet)
+	grouping, err := groupFilesStructured([]string{"alpha_R1.fastq.gz"}, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured: %v", err)
+		t.Fatalf("groupFilesStructured: %v", err)
 	}
-	if len(grouping.Groups) != 1 {
-		t.Fatalf("expected one explicit empty-coordinate group, got %d", len(grouping.Groups))
+	if len(grouping.groups) != 1 {
+		t.Fatalf("expected one explicit empty-coordinate group, got %d", len(grouping.groups))
 	}
-	if grouping.Groups[0].Coordinate.Components == nil || len(grouping.Groups[0].Coordinate.Components) != 0 {
-		t.Fatalf("empty coordinate components should be explicit, got %#v", grouping.Groups[0].Coordinate.Components)
+	if grouping.groups[0].coordinate.components == nil || len(grouping.groups[0].coordinate.components) != 0 {
+		t.Fatalf("empty coordinate components should be explicit, got %#v", grouping.groups[0].coordinate.components)
 	}
-	if grouping.Groups[0].Coordinate.stableKey() != "" {
-		t.Fatalf("unexpected empty coordinate stable key %q", grouping.Groups[0].Coordinate.stableKey())
+	if grouping.groups[0].coordinate.stableKey() != "" {
+		t.Fatalf("unexpected empty coordinate stable key %q", grouping.groups[0].coordinate.stableKey())
 	}
 }
 
@@ -236,25 +236,25 @@ func i11aRuleSet() RuleSet {
 	}
 }
 
-func i11aCoordinateFacts(grouping StructuredGroupingResult) map[string]map[string]string {
-	facts := make(map[string]map[string]string, len(grouping.Groups))
-	for _, group := range grouping.Groups {
-		members := make(map[string]string, len(group.ObservedMembers))
-		for role, fileName := range group.ObservedMembers {
+func i11aCoordinateFacts(grouping structuredGroupingResult) map[string]map[string]string {
+	facts := make(map[string]map[string]string, len(grouping.groups))
+	for _, group := range grouping.groups {
+		members := make(map[string]string, len(group.observedMembers))
+		for role, fileName := range group.observedMembers {
 			members[role] = fileName
 		}
-		facts[group.Coordinate.stableKey()] = members
+		facts[group.coordinate.stableKey()] = members
 	}
 	return facts
 }
 
-func i11aGroupByCoordinate(grouping StructuredGroupingResult, key string) (StructuredGroup, bool) {
-	for _, group := range grouping.Groups {
-		if group.Coordinate.stableKey() == key {
+func i11aGroupByCoordinate(grouping structuredGroupingResult, key string) (structuredGroup, bool) {
+	for _, group := range grouping.groups {
+		if group.coordinate.stableKey() == key {
 			return group, true
 		}
 	}
-	return StructuredGroup{}, false
+	return structuredGroup{}, false
 }
 
 func TestI11AStableSubjectCoordinate_DeterministicOrdering(t *testing.T) {
@@ -265,13 +265,13 @@ func TestI11AStableSubjectCoordinate_DeterministicOrdering(t *testing.T) {
 		"beta_L001_R1_001.fastq.gz",
 	}
 
-	grouping, err := GroupFilesStructured(files, ruleSet)
+	grouping, err := groupFilesStructured(files, ruleSet)
 	if err != nil {
-		t.Fatalf("GroupFilesStructured: %v", err)
+		t.Fatalf("groupFilesStructured: %v", err)
 	}
-	keys := make([]string, 0, len(grouping.Groups))
-	for _, group := range grouping.Groups {
-		keys = append(keys, group.Coordinate.stableKey())
+	keys := make([]string, 0, len(grouping.groups))
+	for _, group := range grouping.groups {
+		keys = append(keys, group.coordinate.stableKey())
 	}
 	sorted := append([]string(nil), keys...)
 	sort.Strings(sorted)

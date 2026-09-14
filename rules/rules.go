@@ -64,18 +64,18 @@ func (e *DuplicateCollisionError) Error() string {
 	return fmt.Sprintf("duplicate collision detected: %d entries", len(e.Entries))
 }
 
-type SubjectCoordinate struct {
-	Components []string
+type subjectCoordinate struct {
+	components []string
 }
 
-type StructuredGroup struct {
-	Coordinate      SubjectCoordinate
-	ObservedMembers map[string]string
-	LegacyRowNumber int
+type structuredGroup struct {
+	coordinate      subjectCoordinate
+	observedMembers map[string]string
+	legacyRowNumber int
 }
 
-type StructuredGroupingResult struct {
-	Groups []StructuredGroup
+type structuredGroupingResult struct {
+	groups []structuredGroup
 }
 
 type RoleNormalizationPreviewEntry struct {
@@ -435,22 +435,22 @@ func splitFileName(fileName string, delimiters []string) []string {
 
 // FilesToMap 파일명 리스트 → (RowIdx → (ColumnKey → 파일명)) 구조 생성
 
-func (c SubjectCoordinate) stableKey() string {
-	parts := make([]string, 0, len(c.Components))
-	for _, component := range c.Components {
+func (c subjectCoordinate) stableKey() string {
+	parts := make([]string, 0, len(c.components))
+	for _, component := range c.components {
 		parts = append(parts, fmt.Sprintf("%d:%s", len(component), component))
 	}
 	return strings.Join(parts, "|")
 }
 
-func deriveSubjectCoordinate(parts []string, matchParts []int) SubjectCoordinate {
+func deriveSubjectCoordinate(parts []string, matchParts []int) subjectCoordinate {
 	components := make([]string, 0, len(matchParts))
 	for _, idx := range matchParts {
 		if idx >= 0 && idx < len(parts) {
 			components = append(components, parts[idx])
 		}
 	}
-	return SubjectCoordinate{Components: components}
+	return subjectCoordinate{components: components}
 }
 
 func deriveObservedRoleKey(parts []string, matchParts []int) string {
@@ -463,13 +463,13 @@ func deriveObservedRoleKey(parts []string, matchParts []int) string {
 	return strings.Join(components, "_")
 }
 
-// GroupFilesStructured groups files by an internal stable subject coordinate.
+// groupFilesStructured groups files by an internal stable subject coordinate.
 // The coordinate keeps structured row components and uses a length-prefixed
 // internal key so components that collide under "_" joining remain distinct.
-func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupingResult, error) {
+func groupFilesStructured(fileNames []string, ruleSet RuleSet) (structuredGroupingResult, error) {
 	rowMap := make(map[string]int) // stable coordinate key → encounter rowIndex
 	nextRowIdx := 0
-	result := make(map[int]StructuredGroup)
+	result := make(map[int]structuredGroup)
 	type duplicateKey struct {
 		rowKey  string
 		roleKey string
@@ -483,14 +483,14 @@ func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupi
 		// 1) Stable subject coordinate 생성
 		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
 		stableKey := coordinate.stableKey()
-		rowKey := strings.Join(coordinate.Components, "_")
+		rowKey := strings.Join(coordinate.components, "_")
 
 		if _, found := rowMap[stableKey]; !found {
 			rowMap[stableKey] = nextRowIdx
-			result[nextRowIdx] = StructuredGroup{
-				Coordinate:      coordinate,
-				ObservedMembers: make(map[string]string),
-				LegacyRowNumber: nextRowIdx,
+			result[nextRowIdx] = structuredGroup{
+				coordinate:      coordinate,
+				observedMembers: make(map[string]string),
+				legacyRowNumber: nextRowIdx,
 			}
 			nextRowIdx++
 		}
@@ -501,7 +501,7 @@ func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupi
 		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
 
 		// 3) 결과에 추가
-		if existing, exists := group.ObservedMembers[colKey]; exists && existing != fn {
+		if existing, exists := group.observedMembers[colKey]; exists && existing != fn {
 			key := duplicateKey{rowKey: stableKey, roleKey: colKey}
 			entry, found := duplicateMap[key]
 			if !found {
@@ -519,7 +519,7 @@ func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupi
 			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, fn)
 			continue
 		}
-		group.ObservedMembers[colKey] = fn
+		group.observedMembers[colKey] = fn
 		result[rowIdx] = group
 	}
 
@@ -531,28 +531,28 @@ func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupi
 			sort.Strings(entry.SourceFileNames)
 			entries = append(entries, *entry)
 		}
-		return StructuredGroupingResult{}, &DuplicateCollisionError{Entries: entries}
+		return structuredGroupingResult{}, &DuplicateCollisionError{Entries: entries}
 	}
 
-	groups := make([]StructuredGroup, 0, len(result))
+	groups := make([]structuredGroup, 0, len(result))
 	for _, group := range result {
 		groups = append(groups, group)
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].Coordinate.stableKey() < groups[j].Coordinate.stableKey()
+		return groups[i].coordinate.stableKey() < groups[j].coordinate.stableKey()
 	})
 
-	return StructuredGroupingResult{Groups: groups}, nil
+	return structuredGroupingResult{groups: groups}, nil
 }
 
-func LegacyGroupsFromStructured(grouping StructuredGroupingResult) map[int]map[string]string {
-	result := make(map[int]map[string]string, len(grouping.Groups))
-	for _, group := range grouping.Groups {
-		members := make(map[string]string, len(group.ObservedMembers))
-		for role, fileName := range group.ObservedMembers {
+func legacyGroupsFromStructured(grouping structuredGroupingResult) map[int]map[string]string {
+	result := make(map[int]map[string]string, len(grouping.groups))
+	for _, group := range grouping.groups {
+		members := make(map[string]string, len(group.observedMembers))
+		for role, fileName := range group.observedMembers {
 			members[role] = fileName
 		}
-		result[group.LegacyRowNumber] = members
+		result[group.legacyRowNumber] = members
 	}
 	return result
 }
@@ -574,7 +574,7 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 
 		// 1) Row 키 생성
 		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
-		rowKey := strings.Join(coordinate.Components, "_")
+		rowKey := strings.Join(coordinate.components, "_")
 
 		if _, found := rowMap[rowKey]; !found {
 			rowMap[rowKey] = nextRowIdx
