@@ -64,6 +64,20 @@ func (e *DuplicateCollisionError) Error() string {
 	return fmt.Sprintf("duplicate collision detected: %d entries", len(e.Entries))
 }
 
+type subjectCoordinate struct {
+	components []string
+}
+
+type structuredGroup struct {
+	coordinate      subjectCoordinate
+	observedMembers map[string]string
+	legacyRowNumber int
+}
+
+type structuredGroupingResult struct {
+	groups []structuredGroup
+}
+
 type RoleNormalizationPreviewEntry struct {
 	ObservedKey    string
 	NormalizedRole string
@@ -421,6 +435,128 @@ func splitFileName(fileName string, delimiters []string) []string {
 
 // FilesToMap 파일명 리스트 → (RowIdx → (ColumnKey → 파일명)) 구조 생성
 
+func (c subjectCoordinate) stableKey() string {
+	parts := make([]string, 0, len(c.components))
+	for _, component := range c.components {
+		parts = append(parts, fmt.Sprintf("%d:%s", len(component), component))
+	}
+	return strings.Join(parts, "|")
+}
+
+func deriveSubjectCoordinate(parts []string, matchParts []int) subjectCoordinate {
+	components := make([]string, 0, len(matchParts))
+	for _, idx := range matchParts {
+		if idx >= 0 && idx < len(parts) {
+			components = append(components, parts[idx])
+		}
+	}
+	return subjectCoordinate{components: components}
+}
+
+func deriveObservedRoleKey(parts []string, matchParts []int) string {
+	components := make([]string, 0, len(matchParts))
+	for _, idx := range matchParts {
+		if idx >= 0 && idx < len(parts) {
+			components = append(components, parts[idx])
+		}
+	}
+	return strings.Join(components, "_")
+}
+
+// groupFilesStructured groups files by an internal stable subject coordinate.
+// The coordinate keeps structured row components and uses a length-prefixed
+// internal key so components that collide under "_" joining remain distinct.
+func groupFilesStructured(fileNames []string, ruleSet RuleSet) (structuredGroupingResult, error) {
+	rowMap := make(map[string]int) // stable coordinate key → encounter rowIndex
+	nextRowIdx := 0
+	result := make(map[int]structuredGroup)
+	type duplicateKey struct {
+		rowKey  string
+		roleKey string
+	}
+	duplicateMap := make(map[duplicateKey]*DuplicateReportEntry)
+	duplicateOrder := make([]duplicateKey, 0)
+
+	for _, fn := range fileNames {
+		parts := splitFileName(fn, ruleSet.Delimiter)
+
+		// 1) Stable subject coordinate 생성
+		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
+		stableKey := coordinate.stableKey()
+		rowKey := strings.Join(coordinate.components, "_")
+
+		if _, found := rowMap[stableKey]; !found {
+			rowMap[stableKey] = nextRowIdx
+			result[nextRowIdx] = structuredGroup{
+				coordinate:      coordinate,
+				observedMembers: make(map[string]string),
+				legacyRowNumber: nextRowIdx,
+			}
+			nextRowIdx++
+		}
+		rowIdx := rowMap[stableKey]
+		group := result[rowIdx]
+
+		// 2) Column 키 생성
+		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
+
+		// 3) 결과에 추가
+		if existing, exists := group.observedMembers[colKey]; exists && existing != fn {
+			key := duplicateKey{rowKey: stableKey, roleKey: colKey}
+			entry, found := duplicateMap[key]
+			if !found {
+				entry = &DuplicateReportEntry{
+					ReasonCode: "duplicate_role_in_row",
+					RowKey:     rowKey,
+					RoleKey:    colKey,
+				}
+				duplicateMap[key] = entry
+				duplicateOrder = append(duplicateOrder, key)
+			}
+			entry.Candidates = appendUniqueString(entry.Candidates, existing)
+			entry.Candidates = appendUniqueString(entry.Candidates, fn)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, existing)
+			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, fn)
+			continue
+		}
+		group.observedMembers[colKey] = fn
+		result[rowIdx] = group
+	}
+
+	if len(duplicateOrder) > 0 {
+		entries := make([]DuplicateReportEntry, 0, len(duplicateOrder))
+		for _, key := range duplicateOrder {
+			entry := duplicateMap[key]
+			sort.Strings(entry.Candidates)
+			sort.Strings(entry.SourceFileNames)
+			entries = append(entries, *entry)
+		}
+		return structuredGroupingResult{}, &DuplicateCollisionError{Entries: entries}
+	}
+
+	groups := make([]structuredGroup, 0, len(result))
+	for _, group := range result {
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].coordinate.stableKey() < groups[j].coordinate.stableKey()
+	})
+
+	return structuredGroupingResult{groups: groups}, nil
+}
+
+func legacyGroupsFromStructured(grouping structuredGroupingResult) map[int]map[string]string {
+	result := make(map[int]map[string]string, len(grouping.groups))
+	for _, group := range grouping.groups {
+		members := make(map[string]string, len(group.observedMembers))
+		for role, fileName := range group.observedMembers {
+			members[role] = fileName
+		}
+		result[group.legacyRowNumber] = members
+	}
+	return result
+}
+
 // GroupFiles 이름으로 바꿀 예정 파일 목록을 RuleSet 에 따라 행·열 구조로 묶어서 반환
 func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string, error) {
 	rowMap := make(map[string]int) // rowKey → rowIndex
@@ -437,13 +573,8 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 		parts := splitFileName(fn, ruleSet.Delimiter)
 
 		// 1) Row 키 생성
-		var rowKeyParts []string
-		for _, idx := range ruleSet.RowRules.MatchParts {
-			if idx >= 0 && idx < len(parts) {
-				rowKeyParts = append(rowKeyParts, parts[idx])
-			}
-		}
-		rowKey := strings.Join(rowKeyParts, "_")
+		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
+		rowKey := strings.Join(coordinate.components, "_")
 
 		if _, found := rowMap[rowKey]; !found {
 			rowMap[rowKey] = nextRowIdx
@@ -453,13 +584,7 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 		rowIdx := rowMap[rowKey]
 
 		// 2) Column 키 생성
-		var colKeyParts []string
-		for _, idx := range ruleSet.ColumnRules.MatchParts {
-			if idx >= 0 && idx < len(parts) {
-				colKeyParts = append(colKeyParts, parts[idx])
-			}
-		}
-		colKey := strings.Join(colKeyParts, "_")
+		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
 
 		// 3) 결과에 추가
 		if existing, exists := result[rowIdx][colKey]; exists && existing != fn {
