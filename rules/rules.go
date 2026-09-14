@@ -64,6 +64,20 @@ func (e *DuplicateCollisionError) Error() string {
 	return fmt.Sprintf("duplicate collision detected: %d entries", len(e.Entries))
 }
 
+type SubjectCoordinate struct {
+	Components []string
+}
+
+type StructuredGroup struct {
+	Coordinate      SubjectCoordinate
+	ObservedMembers map[string]string
+	LegacyRowNumber int
+}
+
+type StructuredGroupingResult struct {
+	Groups []StructuredGroup
+}
+
 type RoleNormalizationPreviewEntry struct {
 	ObservedKey    string
 	NormalizedRole string
@@ -421,11 +435,41 @@ func splitFileName(fileName string, delimiters []string) []string {
 
 // FilesToMap 파일명 리스트 → (RowIdx → (ColumnKey → 파일명)) 구조 생성
 
-// GroupFiles 이름으로 바꿀 예정 파일 목록을 RuleSet 에 따라 행·열 구조로 묶어서 반환
-func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string, error) {
-	rowMap := make(map[string]int) // rowKey → rowIndex
+func (c SubjectCoordinate) stableKey() string {
+	parts := make([]string, 0, len(c.Components))
+	for _, component := range c.Components {
+		parts = append(parts, fmt.Sprintf("%d:%s", len(component), component))
+	}
+	return strings.Join(parts, "|")
+}
+
+func deriveSubjectCoordinate(parts []string, matchParts []int) SubjectCoordinate {
+	components := make([]string, 0, len(matchParts))
+	for _, idx := range matchParts {
+		if idx >= 0 && idx < len(parts) {
+			components = append(components, parts[idx])
+		}
+	}
+	return SubjectCoordinate{Components: components}
+}
+
+func deriveObservedRoleKey(parts []string, matchParts []int) string {
+	components := make([]string, 0, len(matchParts))
+	for _, idx := range matchParts {
+		if idx >= 0 && idx < len(parts) {
+			components = append(components, parts[idx])
+		}
+	}
+	return strings.Join(components, "_")
+}
+
+// GroupFilesStructured groups files by an internal stable subject coordinate.
+// The coordinate keeps structured row components and uses a length-prefixed
+// internal key so components that collide under "_" joining remain distinct.
+func GroupFilesStructured(fileNames []string, ruleSet RuleSet) (StructuredGroupingResult, error) {
+	rowMap := make(map[string]int) // stable coordinate key → encounter rowIndex
 	nextRowIdx := 0
-	result := make(map[int]map[string]string) // 최종 결과
+	result := make(map[int]StructuredGroup)
 	type duplicateKey struct {
 		rowKey  string
 		roleKey string
@@ -436,34 +480,29 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 	for _, fn := range fileNames {
 		parts := splitFileName(fn, ruleSet.Delimiter)
 
-		// 1) Row 키 생성
-		var rowKeyParts []string
-		for _, idx := range ruleSet.RowRules.MatchParts {
-			if idx >= 0 && idx < len(parts) {
-				rowKeyParts = append(rowKeyParts, parts[idx])
-			}
-		}
-		rowKey := strings.Join(rowKeyParts, "_")
+		// 1) Stable subject coordinate 생성
+		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
+		stableKey := coordinate.stableKey()
+		rowKey := strings.Join(coordinate.Components, "_")
 
-		if _, found := rowMap[rowKey]; !found {
-			rowMap[rowKey] = nextRowIdx
-			result[nextRowIdx] = make(map[string]string)
+		if _, found := rowMap[stableKey]; !found {
+			rowMap[stableKey] = nextRowIdx
+			result[nextRowIdx] = StructuredGroup{
+				Coordinate:      coordinate,
+				ObservedMembers: make(map[string]string),
+				LegacyRowNumber: nextRowIdx,
+			}
 			nextRowIdx++
 		}
-		rowIdx := rowMap[rowKey]
+		rowIdx := rowMap[stableKey]
+		group := result[rowIdx]
 
 		// 2) Column 키 생성
-		var colKeyParts []string
-		for _, idx := range ruleSet.ColumnRules.MatchParts {
-			if idx >= 0 && idx < len(parts) {
-				colKeyParts = append(colKeyParts, parts[idx])
-			}
-		}
-		colKey := strings.Join(colKeyParts, "_")
+		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
 
 		// 3) 결과에 추가
-		if existing, exists := result[rowIdx][colKey]; exists && existing != fn {
-			key := duplicateKey{rowKey: rowKey, roleKey: colKey}
+		if existing, exists := group.ObservedMembers[colKey]; exists && existing != fn {
+			key := duplicateKey{rowKey: stableKey, roleKey: colKey}
 			entry, found := duplicateMap[key]
 			if !found {
 				entry = &DuplicateReportEntry{
@@ -480,7 +519,8 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 			entry.SourceFileNames = appendUniqueString(entry.SourceFileNames, fn)
 			continue
 		}
-		result[rowIdx][colKey] = fn
+		group.ObservedMembers[colKey] = fn
+		result[rowIdx] = group
 	}
 
 	if len(duplicateOrder) > 0 {
@@ -491,10 +531,39 @@ func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string,
 			sort.Strings(entry.SourceFileNames)
 			entries = append(entries, *entry)
 		}
-		return nil, &DuplicateCollisionError{Entries: entries}
+		return StructuredGroupingResult{}, &DuplicateCollisionError{Entries: entries}
 	}
 
-	return result, nil
+	groups := make([]StructuredGroup, 0, len(result))
+	for _, group := range result {
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Coordinate.stableKey() < groups[j].Coordinate.stableKey()
+	})
+
+	return StructuredGroupingResult{Groups: groups}, nil
+}
+
+func LegacyGroupsFromStructured(grouping StructuredGroupingResult) map[int]map[string]string {
+	result := make(map[int]map[string]string, len(grouping.Groups))
+	for _, group := range grouping.Groups {
+		members := make(map[string]string, len(group.ObservedMembers))
+		for role, fileName := range group.ObservedMembers {
+			members[role] = fileName
+		}
+		result[group.LegacyRowNumber] = members
+	}
+	return result
+}
+
+// GroupFiles 이름으로 바꿀 예정 파일 목록을 RuleSet 에 따라 행·열 구조로 묶어서 반환
+func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string, error) {
+	grouping, err := GroupFilesStructured(fileNames, ruleSet)
+	if err != nil {
+		return nil, err
+	}
+	return LegacyGroupsFromStructured(grouping), nil
 }
 
 func appendUniqueString(items []string, value string) []string {
