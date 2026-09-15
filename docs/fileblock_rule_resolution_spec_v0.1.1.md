@@ -251,6 +251,46 @@ invalid rows는 timestamp 이름의 텍스트 파일로 내보낼 수 있다.
 - A-1 Fixture D는 regression anchor(현재 동작 기록)이며, A-2 정책 확정과 충돌하지 않는다.
 - 즉, current behavior 기록과 future policy contract는 분리해서 관리한다.
 
+### 4.11 Subject Outcome 해석 사실 보존
+
+I11B 기준 resolver의 내부 canonical seam은 stable subject별로 `Subject Outcome`을 보존한다.
+Subject Outcome은 **stable subject-local Tori source-derived interpretation facts**다.
+
+현재 내부 reason code의 의미는 다음과 같다.
+
+- `observed_member`: 해당 subject에서 실제 관찰된 member / role observation.
+- `missing_required_role`: 현재 rule semantics가 요구하지만 해당 subject에서 관찰되지 않은 role.
+- `extra_observed_role`: 현재 observed-key validation 관점에서 rule / header가 기대하는 set 밖에서 관찰된 role / member.
+- `unresolved_observed_role`: 관찰은 되었지만 current role-normalization contract에서 authoritative normalized role로 resolve되지 않은 observation.
+
+`missing_required_role`과 `unresolved_observed_role`은 서로 다른 사실이다.
+전자는 rule이 요구한 role observation 자체가 subject 안에 없다는 뜻이고,
+후자는 observation은 존재하지만 normalized typed role로 확정되지 않았다는 뜻이다.
+
+현재 Tori에는 두 해석 계층이 있다.
+
+- observed-key / schema validation 계층
+- normalized typed-role validation 계층
+
+I11B의 `subjectOutcome`은 기존 observed-key 기반 interpretation seam을 보존한다.
+I11B는 normalized typed-role layer의 의미를 조용히 재정의하지 않는다.
+
+Subject Outcome facts는 Pipeline readiness verdict가 아니며, InputBinding authority도 아니다.
+또한 runnable / non-runnable verdict, authorization verdict, compatibility verdict가 아니다.
+Tori resolver는 무엇이 관찰되었고, 무엇이 빠졌고, 무엇이 추가되었고,
+무엇이 아직 normalize되지 않았는지를 기록한다.
+그 사실이 실행 가능성이나 Pipeline requirement를 만족하는지는 Pipeline authority가 별도로 판단한다.
+
+canonical internal subject outcome은 legacy FileBlock / CSV / invalid-file output보다 풍부한 observational truth다.
+legacy FileBlock / CSV / invalid-file output은 compatibility projection이다.
+따라서 legacy projection에서 incomplete / extra / unresolved fact 일부가 보이지 않아도
+canonical internal fact가 소실되었다는 뜻은 아니다.
+반대로 이 내부 사실 보존은 legacy export behavior를 변경하지 않는다.
+
+`subjectOutcome.facts`의 ordering은 deterministic해야 한다.
+stable subject coordinate는 I11A가 소유하며, I11B는 subject-local outcome facts를 추가할 뿐
+stable subject coordinate를 재정의하지 않는다.
+
 ---
 
 ## 5. 문제 진단
