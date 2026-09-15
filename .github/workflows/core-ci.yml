@@ -57,7 +57,15 @@ jobs:
         continue-on-error: true
         run: buf format --exit-code -d protos
 
+      # Only the pull_request path compares against master and therefore needs a
+      # local master ref. On a push to master, master is the checked-out branch
+      # and `git fetch origin master:refs/heads/master` fails with
+      # "refusing to fetch into branch ... checked out", which reddened this
+      # required check even though the comparison below is observe-only. The
+      # push path needs no fetch: checkout above uses fetch-depth: 0, so HEAD~1
+      # is already present.
       - name: Fetch base branch ref
+        if: github.event_name == 'pull_request'
         run: git fetch origin master:refs/heads/master
 
       - name: Buf breaking change check (Observe)
