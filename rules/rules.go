@@ -71,11 +71,28 @@ type subjectCoordinate struct {
 type structuredGroup struct {
 	coordinate      subjectCoordinate
 	observedMembers map[string]string
+	outcome         subjectOutcome
 	legacyRowNumber int
 }
 
 type structuredGroupingResult struct {
 	groups []structuredGroup
+}
+
+type subjectOutcome struct {
+	observedMembers           map[string]string
+	missingRequiredRoles      []string
+	extraObservedMembers      map[string]string
+	unresolvedObservedMembers map[string]string
+	facts                     []subjectOutcomeFact
+}
+
+type subjectOutcomeFact struct {
+	reasonCode     string
+	role           string
+	observedKey    string
+	normalizedRole string
+	fileName       string
 }
 
 type RoleNormalizationPreviewEntry struct {
@@ -463,6 +480,78 @@ func deriveObservedRoleKey(parts []string, matchParts []int) string {
 	return strings.Join(components, "_")
 }
 
+func buildSubjectOutcome(observedMembers map[string]string, ruleSet RuleSet) subjectOutcome {
+	observed := make(map[string]string, len(observedMembers))
+	extra := make(map[string]string)
+	unresolved := make(map[string]string)
+	facts := make([]subjectOutcomeFact, 0, len(observedMembers)*3+len(ruleSet.Header))
+
+	headerSet := make(map[string]struct{}, len(ruleSet.Header))
+	for _, header := range ruleSet.Header {
+		headerSet[header] = struct{}{}
+	}
+
+	observedKeys := make([]string, 0, len(observedMembers))
+	for observedKey := range observedMembers {
+		observedKeys = append(observedKeys, observedKey)
+	}
+	sort.Strings(observedKeys)
+
+	for _, observedKey := range observedKeys {
+		fileName := observedMembers[observedKey]
+		observed[observedKey] = fileName
+
+		normalizedRole, resolved := NormalizeRoleKey(observedKey, ruleSet)
+		facts = append(facts, subjectOutcomeFact{
+			reasonCode:     "observed_member",
+			observedKey:    observedKey,
+			normalizedRole: normalizedRole,
+			fileName:       fileName,
+		})
+
+		if !resolved {
+			unresolved[observedKey] = fileName
+			facts = append(facts, subjectOutcomeFact{
+				reasonCode:  "unresolved_observed_role",
+				observedKey: observedKey,
+				fileName:    fileName,
+			})
+		}
+
+		if _, ok := headerSet[observedKey]; !ok {
+			extra[observedKey] = fileName
+			facts = append(facts, subjectOutcomeFact{
+				reasonCode:     "extra_observed_role",
+				role:           normalizedRole,
+				observedKey:    observedKey,
+				normalizedRole: normalizedRole,
+				fileName:       fileName,
+			})
+		}
+	}
+
+	missing := make([]string, 0)
+	for _, header := range ruleSet.Header {
+		fileName, ok := observedMembers[header]
+		if ok && fileName != "" {
+			continue
+		}
+		missing = append(missing, header)
+		facts = append(facts, subjectOutcomeFact{
+			reasonCode: "missing_required_role",
+			role:       header,
+		})
+	}
+
+	return subjectOutcome{
+		observedMembers:           observed,
+		missingRequiredRoles:      missing,
+		extraObservedMembers:      extra,
+		unresolvedObservedMembers: unresolved,
+		facts:                     facts,
+	}
+}
+
 // groupFilesStructured groups files by an internal stable subject coordinate.
 // The coordinate keeps structured row components and uses a length-prefixed
 // internal key so components that collide under "_" joining remain distinct.
@@ -532,6 +621,11 @@ func groupFilesStructured(fileNames []string, ruleSet RuleSet) (structuredGroupi
 			entries = append(entries, *entry)
 		}
 		return structuredGroupingResult{}, &DuplicateCollisionError{Entries: entries}
+	}
+
+	for rowIdx, group := range result {
+		group.outcome = buildSubjectOutcome(group.observedMembers, ruleSet)
+		result[rowIdx] = group
 	}
 
 	groups := make([]structuredGroup, 0, len(result))
