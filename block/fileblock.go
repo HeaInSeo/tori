@@ -23,7 +23,9 @@ func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
 	}
 
 	// 3. 디렉터리 내 파일 목록 읽기 (제외 패턴 지정)
-	exclusions := []string{"rule.json", "invalid_files", "fileblock.csv", "*.pb"}
+	// invalid_files_* 는 이 함수가 생성하는 리포트이므로, 같은 디렉터리를 다시 스캔할 때
+	// source 입력으로 재유입되지 않도록 제외한다.
+	exclusions := []string{"rule.json", "invalid_files", "invalid_files_*", "fileblock.csv", "*.pb"}
 	fileNames, err := rules.ListFilesExclude(dirPath, exclusions)
 	if err != nil {
 		return nil, fmt.Errorf("ReadAllFileNames error: %w", err)

@@ -77,6 +77,97 @@ func TestGenerateFileBlock_IsolatesDuplicateConflictWithoutWholeBatchFailure(t *
 	}
 }
 
+// P2-B regression: GenerateFileBlockFromDir writes invalid_files_<timestamp>.txt into the
+// scanned directory. A subsequent scan of the same directory must NOT re-ingest that
+// generated report as a SOURCE input. Steps: (1) first run creates a conflict report;
+// (2) second run over the same directory; (3) the generated report is not observed as a
+// source; (4) no spurious subject/member/fact appears from it. Without the invalid_files_*
+// source-scan exclusion, the second run would ingest the report and produce a different
+// (larger) result than the first.
+func TestGenerateFileBlockFromDir_ExcludesGeneratedInvalidReport(t *testing.T) {
+	dir := t.TempDir()
+	ruleSet := rules.RuleSet{
+		Delimiter:   []string{"_", "."},
+		Header:      []string{"R1", "R2"},
+		RowRules:    rules.RowRules{MatchParts: []int{0, 1, 2, 4, 5, 6}},
+		ColumnRules: rules.ColumnRules{MatchParts: []int{3}},
+	}
+	data, err := json.Marshal(ruleSet)
+	if err != nil {
+		t.Fatalf("marshal rule set: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), data, 0600); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	// subject sample1 collides (writes an invalid report); subject sample2 is healthy.
+	for _, name := range []string{
+		"sample1_S1_L001_R1_001.fastq.gz",
+		"sample1__S1_L001_R1_001.fastq.gz",
+		"sample2_S2_L001_R1_001.fastq.gz",
+		"sample2_S2_L001_R2_001.fastq.gz",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	fb1, err := GenerateFileBlockFromDir(dir)
+	if err != nil {
+		t.Fatalf("first GenerateFileBlockFromDir: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "invalid_files_*.txt"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected first run to write one invalid report, got %v %v", matches, err)
+	}
+
+	fb2, err := GenerateFileBlockFromDir(dir)
+	if err != nil {
+		t.Fatalf("second GenerateFileBlockFromDir: %v", err)
+	}
+
+	// The second run must observe exactly the same source-derived result as the first:
+	// the generated invalid report was NOT ingested as a source.
+	if len(fb2.GetRows()) != len(fb1.GetRows()) {
+		t.Fatalf("second run row count changed (report re-ingested?): first=%d second=%d",
+			len(fb1.GetRows()), len(fb2.GetRows()))
+	}
+	if len(fb2.GetRows()) != 1 {
+		t.Fatalf("expected exactly the healthy sibling row, got %d", len(fb2.GetRows()))
+	}
+	cells := fb2.GetRows()[0].GetCells()
+	if cells["R1"] != "sample2_S2_L001_R1_001.fastq.gz" || cells["R2"] != "sample2_S2_L001_R2_001.fastq.gz" {
+		t.Fatalf("unexpected second-run cells: %#v", cells)
+	}
+	// No spurious member sourced from a generated invalid_files_* report.
+	for _, row := range fb2.GetRows() {
+		for role, val := range row.GetCells() {
+			if strings.HasPrefix(val, "invalid_files") {
+				t.Fatalf("generated report leaked in as a source member: role=%s val=%s", role, val)
+			}
+		}
+	}
+
+	// A re-ingested report would also surface as a spurious fact in the invalid report
+	// (it splits into a header-mismatched row rather than a published FileBlock row).
+	// The second run's invalid report must not list any invalid_files_* filename.
+	reports, err := filepath.Glob(filepath.Join(dir, "invalid_files_*.txt"))
+	if err != nil {
+		t.Fatalf("glob invalid reports: %v", err)
+	}
+	for _, r := range reports {
+		content, rErr := os.ReadFile(r) //nolint:gosec // test-controlled temp path
+		if rErr != nil {
+			t.Fatalf("read %s: %v", r, rErr)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(content)), "\n") {
+			if strings.HasPrefix(line, "invalid_files") {
+				t.Fatalf("generated report re-ingested as a source (listed in invalid report): %q", line)
+			}
+		}
+	}
+}
+
 func TestGenerateFileBlock_UsesHeaderExactValidationForMissingExtraRoles(t *testing.T) {
 	dir := t.TempDir()
 	ruleSet := rules.RuleSet{

@@ -233,7 +233,7 @@ func GenerateResolverPreviewFromDir(dirPath string) (ResolverPreview, error) {
 		return ResolverPreview{}, fmt.Errorf("rule set has conflicts or unused parts")
 	}
 
-	exclusions := []string{"rule.json", "invalid_files", "fileblock.csv", "*.pb"}
+	exclusions := []string{"rule.json", "invalid_files", "invalid_files_*", "fileblock.csv", "*.pb"}
 	fileNames, err := ListFilesExclude(dirPath, exclusions)
 	if err != nil {
 		return ResolverPreview{}, fmt.Errorf("failed to list preview files: %w", err)
@@ -988,7 +988,16 @@ func SaveInvalidFiles(invalidRows []map[string]string, outputDir string) (err er
 	}()
 
 	for _, row := range invalidRows {
+		// Sort the file names within each row deterministically before writing.
+		// The invalid-row model is a map, so ranging it directly would emit a
+		// non-deterministic ordering; the same conflict input must always produce
+		// identical invalid-report content ordering.
+		fileNames := make([]string, 0, len(row))
 		for _, fn := range row {
+			fileNames = append(fileNames, fn)
+		}
+		sort.Strings(fileNames)
+		for _, fn := range fileNames {
 			if _, wErr := f.WriteString(fn + "\n"); wErr != nil {
 				err = fmt.Errorf("failed to write to %s: %w", outFile, wErr)
 				return err
@@ -1045,6 +1054,11 @@ func ListFilesExclude(dirPath string, exclusions []string) ([]string, error) {
 			if strings.HasPrefix(ex, "*.") {
 				ext := ex[1:] // "*.pb" -> ".pb"
 				if strings.Contains(name, ext) {
+					return true
+				}
+			} else if strings.HasSuffix(ex, "*") {
+				prefix := ex[:len(ex)-1] // "invalid_files_*" -> "invalid_files_"
+				if strings.HasPrefix(name, prefix) {
 					return true
 				}
 			} else {
