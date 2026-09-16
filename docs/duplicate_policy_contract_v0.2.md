@@ -40,7 +40,7 @@ projection 경로의 동작 정의는 본 문서가 대체한다.
 - **Publication authority:** `block.GenerateFileBlockFromDir`, `block.GenerateFileBlock`,
   `block.GenerateFileBlockWithRuleSet`, `block.ProjectFileBlock`는 모두 `GroupFilesIsolated`를
   통해 그룹핑한다. 건강한 subject만 FileBlock으로 발행되고, 충돌 subject는 healthy winner가 되지
-  않으며 `block.rules.InvalidRowsFromConflicts`를 통해 `invalid_files` 리포트로 남아 계속 보인다.
+  않으며 `rules.InvalidRowsFromConflicts`를 통해 `invalid_files` 리포트로 남아 계속 보인다.
 
 ## 3. Legacy / non-canonical 처리
 
