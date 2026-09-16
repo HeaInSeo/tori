@@ -125,22 +125,28 @@ func TestSharedFSFixtureSmoke_PairedFASTQ(t *testing.T) {
 	}
 	assertNoGeneratedPreviewOutputs(t, duplicateWorkDir)
 
-	_, err = GenerateFileBlock(duplicateWorkDir, duplicateFiles)
-	if err == nil {
-		t.Fatalf("expected duplicate collision error for duplicate-role fixture")
+	// TDI-I12: the publication authority isolates the R1 duplicate to its subject and
+	// does NOT abort the whole batch (the legacy resolver preview above still refuses,
+	// as a coarse non-authoritative diagnostic). The conflicted subject must not become
+	// a published healthy winner, and its source files must remain visible on disk in
+	// the invalid_files report rather than silently disappearing.
+	dupFB, err := GenerateFileBlock(duplicateWorkDir, duplicateFiles)
+	if err != nil {
+		t.Fatalf("expected no whole-batch error under I12 conflict isolation, got %v", err)
 	}
-
-	var dupErr *rules.DuplicateCollisionError
-	if !errors.As(err, &dupErr) {
-		t.Fatalf("expected DuplicateCollisionError, got %T: %v", err, err)
+	for _, row := range dupFB.GetRows() {
+		if row.GetCells()["R1"] != "" {
+			t.Fatalf("expected the R1-conflicted subject not to publish a healthy R1 winner, got %#v", row.GetCells())
+		}
 	}
-	if len(dupErr.Entries) == 0 {
-		t.Fatalf("expected duplicate entries")
+	invalidMatches, err := filepath.Glob(filepath.Join(duplicateWorkDir, "invalid_files_*.txt"))
+	if err != nil {
+		t.Fatalf("glob duplicate-role invalid report: %v", err)
 	}
-	entry := dupErr.Entries[0]
-	if entry.ReasonCode != "duplicate_role_in_row" || entry.RoleKey != "R1" {
-		t.Fatalf("unexpected duplicate entry: %#v", entry)
+	if len(invalidMatches) != 1 {
+		t.Fatalf("expected one invalid report keeping the conflicted subject visible, got %d", len(invalidMatches))
 	}
+	assertGeneratedFileBlockOutputs(t, duplicateWorkDir)
 }
 
 func TestSharedFSFixtureSmoke_AlignmentBAMIndexFixtureSpecificCurrentRuleProbe(t *testing.T) {

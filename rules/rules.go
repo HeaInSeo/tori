@@ -651,7 +651,187 @@ func legacyGroupsFromStructured(grouping structuredGroupingResult) map[int]map[s
 	return result
 }
 
-// GroupFiles 이름으로 바꿀 예정 파일 목록을 RuleSet 에 따라 행·열 구조로 묶어서 반환
+// --- TDI-I12 subject-scoped conflict isolation ------------------------------
+//
+// I12 supersedes the whole-group fail-fast posture: a duplicate role-in-row is a
+// STRUCTURAL CONFLICT scoped to ONE stable subject coordinate. A conflict in one
+// subject must not abort healthy sibling subjects in the same batch; the collided
+// subject must stay visible as conflict evidence (never downgraded to a healthy
+// grouped member and never resolved by an arbitrary winning candidate).
+// See docs/duplicate_policy_contract_v0.2.md.
+
+// DuplicateRoleEvidence is the deterministic, source-only evidence for one role
+// collision inside a single subject coordinate. Candidates and SourceFileNames are
+// sorted so the evidence is canonical regardless of input order.
+type DuplicateRoleEvidence struct {
+	// ReasonCode is fixed at "duplicate_role_in_row" for a duplicate role collision.
+	ReasonCode string
+	// Role is the observed column/role key that collided.
+	Role string
+	// Candidates are the distinct colliding source file names, sorted.
+	Candidates []string
+	// SourceFileNames preserves the source filename context; it mirrors Candidates.
+	SourceFileNames []string
+}
+
+// SubjectConflict is a structural conflict scoped to exactly one stable subject
+// coordinate. It records every role collision observed for that subject. It carries
+// only source/grouping facts — it does not decide runnability, authorization, or any
+// Run/Auto-Run policy (that boundary belongs to downstream consumers, not Tori).
+type SubjectConflict struct {
+	// SubjectKey is the internal stable coordinate key (length-prefixed, collision-free).
+	SubjectKey string
+	// SubjectComponents are the coordinate components in authored matchParts order.
+	SubjectComponents []string
+	// RowKey is the human-readable "_"-joined coordinate (matches legacy row key text).
+	RowKey string
+	// Roles are the per-role collision evidences, sorted by Role.
+	Roles []DuplicateRoleEvidence
+	// SourceFileNames are ALL distinct source files that mapped to this subject, sorted,
+	// so the conflicted subject never disappears from downstream evidence/reporting.
+	SourceFileNames []string
+}
+
+// IsolatedGroupingResult is the canonical grouping outcome under I12 conflict
+// isolation: Healthy carries the subjects with no role collision (legacy row-index →
+// role → file), Conflicts carries the collided subjects as deterministic evidence.
+// Healthy and Conflicts are disjoint by subject coordinate.
+type IsolatedGroupingResult struct {
+	Healthy   map[int]map[string]string
+	Conflicts []SubjectConflict
+}
+
+type isolationSubjectAccum struct {
+	coordinate   subjectCoordinate
+	rowKey       string
+	encounterIdx int
+	firstSeen    map[string]string   // role -> first-seen file (provisional healthy member)
+	roleFiles    map[string][]string // role -> distinct files, encounter order
+	allFiles     []string            // distinct files for the subject, encounter order
+}
+
+// GroupFilesIsolated is the CANONICAL grouping path for publication/projection. It
+// never aborts the batch on a duplicate: a subject with any duplicate role collision
+// is returned as a SubjectConflict (visible evidence, no arbitrary winner) while every
+// healthy sibling subject is grouped normally. Output ordering is deterministic:
+// conflicts are sorted by stable subject key, role evidence by role, and all file
+// lists are sorted.
+func GroupFilesIsolated(fileNames []string, ruleSet RuleSet) IsolatedGroupingResult {
+	subjects := make(map[string]*isolationSubjectAccum)
+	order := make([]string, 0, len(fileNames))
+
+	for _, fn := range fileNames {
+		parts := splitFileName(fn, ruleSet.Delimiter)
+		coordinate := deriveSubjectCoordinate(parts, ruleSet.RowRules.MatchParts)
+		stableKey := coordinate.stableKey()
+		colKey := deriveObservedRoleKey(parts, ruleSet.ColumnRules.MatchParts)
+
+		accum, ok := subjects[stableKey]
+		if !ok {
+			accum = &isolationSubjectAccum{
+				coordinate:   coordinate,
+				rowKey:       strings.Join(coordinate.components, "_"),
+				encounterIdx: len(order),
+				firstSeen:    make(map[string]string),
+				roleFiles:    make(map[string][]string),
+			}
+			subjects[stableKey] = accum
+			order = append(order, stableKey)
+		}
+
+		accum.allFiles = appendUniqueString(accum.allFiles, fn)
+		accum.roleFiles[colKey] = appendUniqueString(accum.roleFiles[colKey], fn)
+		if _, seen := accum.firstSeen[colKey]; !seen {
+			accum.firstSeen[colKey] = fn
+		}
+	}
+
+	result := IsolatedGroupingResult{
+		Healthy:   make(map[int]map[string]string),
+		Conflicts: make([]SubjectConflict, 0),
+	}
+
+	for _, stableKey := range order {
+		accum := subjects[stableKey]
+
+		conflictedRoles := make([]string, 0)
+		for role, files := range accum.roleFiles {
+			if len(files) > 1 {
+				conflictedRoles = append(conflictedRoles, role)
+			}
+		}
+
+		if len(conflictedRoles) == 0 {
+			members := make(map[string]string, len(accum.firstSeen))
+			for role, file := range accum.firstSeen {
+				members[role] = file
+			}
+			result.Healthy[accum.encounterIdx] = members
+			continue
+		}
+
+		sort.Strings(conflictedRoles)
+		evidences := make([]DuplicateRoleEvidence, 0, len(conflictedRoles))
+		for _, role := range conflictedRoles {
+			candidates := append([]string(nil), accum.roleFiles[role]...)
+			sort.Strings(candidates)
+			source := append([]string(nil), candidates...)
+			evidences = append(evidences, DuplicateRoleEvidence{
+				ReasonCode:      "duplicate_role_in_row",
+				Role:            role,
+				Candidates:      candidates,
+				SourceFileNames: source,
+			})
+		}
+
+		subjectFiles := append([]string(nil), accum.allFiles...)
+		sort.Strings(subjectFiles)
+		result.Conflicts = append(result.Conflicts, SubjectConflict{
+			SubjectKey:        stableKey,
+			SubjectComponents: append([]string(nil), accum.coordinate.components...),
+			RowKey:            accum.rowKey,
+			Roles:             evidences,
+			SourceFileNames:   subjectFiles,
+		})
+	}
+
+	sort.Slice(result.Conflicts, func(i, j int) bool {
+		return result.Conflicts[i].SubjectKey < result.Conflicts[j].SubjectKey
+	})
+
+	return result
+}
+
+// InvalidRowsFromConflicts adapts conflicted subjects into the invalid-row shape used
+// by SaveInvalidFiles, so a conflicted subject's source files remain visible on disk
+// (in the invalid_files report) instead of silently disappearing. It never emits a
+// healthy grouped member for a conflicted subject.
+func InvalidRowsFromConflicts(conflicts []SubjectConflict) []map[string]string {
+	rows := make([]map[string]string, 0, len(conflicts))
+	for _, conflict := range conflicts {
+		row := make(map[string]string, len(conflict.SourceFileNames))
+		for _, fileName := range conflict.SourceFileNames {
+			row[fileName] = fileName
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// GroupFiles groups files by row/column keys and, on any duplicate role-in-row
+// collision, fails the WHOLE batch with a DuplicateCollisionError.
+//
+// LEGACY / NON-CANONICAL (TDI-I12). This whole-group fail-fast posture is the
+// superseded v0.1 duplicate policy (see docs/duplicate_policy_contract_v0.1.md).
+// It is NOT the canonical publication authority any more: the FileBlock publication
+// path (block.GenerateFileBlock*, block.ProjectFileBlock) now groups through
+// GroupFilesIsolated, which isolates a duplicate to its single subject coordinate
+// and never aborts healthy siblings (docs/duplicate_policy_contract_v0.2.md).
+//
+// GroupFiles is retained only as a coarse diagnostic that loudly refuses a batch
+// containing any collision: it never silently picks an arbitrary winner and never
+// hides a collision. It is safe precisely because no publication path depends on it.
+// Do not route new publication/projection work through GroupFiles.
 func GroupFiles(fileNames []string, ruleSet RuleSet) (map[int]map[string]string, error) {
 	rowMap := make(map[string]int) // rowKey → rowIndex
 	nextRowIdx := 0
