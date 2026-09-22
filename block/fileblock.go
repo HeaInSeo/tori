@@ -23,20 +23,20 @@ func GenerateFileBlockFromDir(dirPath string) (*pb.FileBlock, error) {
 	}
 
 	// 3. 디렉터리 내 파일 목록 읽기 (제외 패턴 지정)
-	exclusions := []string{"rule.json", "invalid_files", "fileblock.csv", "*.pb"}
+	// invalid_files_* 는 이 함수가 생성하는 리포트이므로, 같은 디렉터리를 다시 스캔할 때
+	// source 입력으로 재유입되지 않도록 제외한다.
+	exclusions := []string{"rule.json", "invalid_files", "invalid_files_*", "fileblock.csv", "*.pb"}
 	fileNames, err := rules.ListFilesExclude(dirPath, exclusions)
 	if err != nil {
 		return nil, fmt.Errorf("ReadAllFileNames error: %w", err)
 	}
 
-	// 4. 룰 기준으로 map[int]map[string]string 생성
-	resultMap, err := rules.GroupFiles(fileNames, ruleSet)
-	if err != nil {
-		return nil, fmt.Errorf("GroupFiles error: %w", err)
-	}
+	// 4. 룰 기준으로 그룹핑 (TDI-I12: duplicate collision은 해당 subject로 격리, 배치 전체를 중단하지 않음)
+	grouped := rules.GroupFilesIsolated(fileNames, ruleSet)
 
-	// 5. 유효/무효 행 분리
-	validMap, invalidRows := rules.FilterGroupsByHeaders(resultMap, ruleSet.Header)
+	// 5. 유효/무효 행 분리. 격리된 conflict subject는 healthy winner가 되지 않고 invalid_files 로만 남는다.
+	validMap, invalidRows := rules.FilterGroupsByHeaders(grouped.Healthy, ruleSet.Header)
+	invalidRows = append(invalidRows, rules.InvalidRowsFromConflicts(grouped.Conflicts)...)
 
 	// 6. validMap → CSV 파일로 저장
 	if err := rules.ExportResultsCSV(validMap, ruleSet.Header, dirPath); err != nil {
@@ -87,13 +87,13 @@ func GenerateFileBlockWithRuleSet(filePath string, files []string, ruleSet rules
 		return nil, fmt.Errorf("rule set has conflicts or unused parts")
 	}
 
-	resultMap, err := rules.GroupFiles(files, ruleSet)
-	if err != nil {
-		return nil, fmt.Errorf("failed to blockify files: %w", err)
-	}
+	// TDI-I12: duplicate collision은 해당 subject로 격리되며 배치 전체를 중단하지 않는다.
+	grouped := rules.GroupFilesIsolated(files, ruleSet)
 
-	// Filter the result map into valid and invalid rows. 열의 갯수 기준으로 유효/무효 행을 분리
-	validRows, invalidRows := rules.FilterGroupsByHeaders(resultMap, ruleSet.Header)
+	// Filter the healthy subjects into valid and invalid rows. 열의 갯수 기준으로 유효/무효 행을 분리.
+	// 격리된 conflict subject는 healthy winner가 되지 않고 invalid_files 로만 남는다.
+	validRows, invalidRows := rules.FilterGroupsByHeaders(grouped.Healthy, ruleSet.Header)
+	invalidRows = append(invalidRows, rules.InvalidRowsFromConflicts(grouped.Conflicts)...)
 
 	// Save valid rows to a CSV file. 사용자에게 보여주기 위함.
 	if err := rules.ExportResultsCSV(validRows, ruleSet.Header, filePath); err != nil {
@@ -108,8 +108,7 @@ func GenerateFileBlockWithRuleSet(filePath string, files []string, ruleSet rules
 	// blockId 를 filePath 로 잡아둠.
 	fbd := ConvertMapToFileBlock(validRows, ruleSet.Header, filePath)
 	pbName := filepath.Join(filePath, fmt.Sprintf("%sfiles.pb", filepath.Base(filePath)))
-	err = protoio.SaveMessage(pbName, fbd, 0o644)
-	if err != nil {
+	if err := protoio.SaveMessage(pbName, fbd, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to save proto message: %w", err)
 	}
 
@@ -126,10 +125,9 @@ func ProjectFileBlock(blockID string, files []string, ruleSet rules.RuleSet) (*p
 	if !rules.IsValidRuleSet(ruleSet) {
 		return nil, fmt.Errorf("rule set has conflicts or unused parts")
 	}
-	resultMap, err := rules.GroupFiles(files, ruleSet)
-	if err != nil {
-		return nil, fmt.Errorf("failed to blockify files: %w", err)
-	}
-	validRows, _ := rules.FilterGroupsByHeaders(resultMap, ruleSet.Header)
+	// TDI-I12: duplicate collision은 해당 subject로 격리되어 projection에서 제외되며,
+	// 건강한 sibling subject의 projection은 유지된다 (배치 전체 실패 없음).
+	grouped := rules.GroupFilesIsolated(files, ruleSet)
+	validRows, _ := rules.FilterGroupsByHeaders(grouped.Healthy, ruleSet.Header)
 	return ConvertMapToFileBlock(validRows, ruleSet.Header, blockID), nil
 }

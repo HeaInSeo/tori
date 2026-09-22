@@ -1013,6 +1013,97 @@ func TestSaveInvalidFiles_NoRows(t *testing.T) {
 	}
 }
 
+// P2-A regression: the invalid-report content ordering must be deterministic.
+// InvalidRowsFromConflicts stores a conflict's (already-sorted) source files in a map,
+// and SaveInvalidFiles previously ranged that map directly, so the written ordering was
+// re-randomized by Go map iteration. The SAME conflict input, repeated and/or reordered,
+// must produce IDENTICAL invalid-report content ordering. Without the sort-before-write
+// fix this test fails with overwhelming probability (map iteration is randomized).
+func TestSaveInvalidFiles_DeterministicOrdering(t *testing.T) {
+	// A single conflicted subject whose source filenames span enough entries that a
+	// randomized map iteration would almost never coincide with sorted order.
+	sources := []string{
+		"z_S1_L001_R1_001.fastq.gz",
+		"a_S1_L001_R1_001.fastq.gz",
+		"m_S1_L001_R1_001.fastq.gz",
+		"b_S1_L001_R1_001.fastq.gz",
+		"q_S1_L001_R1_001.fastq.gz",
+		"c_S1_L001_R1_001.fastq.gz",
+		"n_S1_L001_R1_001.fastq.gz",
+		"d_S1_L001_R1_001.fastq.gz",
+	}
+
+	want := append([]string(nil), sources...)
+	sort.Strings(want)
+
+	readReport := func(t *testing.T, conflict SubjectConflict) []string {
+		t.Helper()
+		dir := t.TempDir()
+		rows := InvalidRowsFromConflicts([]SubjectConflict{conflict})
+		if err := SaveInvalidFiles(rows, dir); err != nil {
+			t.Fatalf("SaveInvalidFiles error: %v", err)
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, "invalid_files_*.txt"))
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("expected exactly one invalid report: %v %v", matches, err)
+		}
+		data, err := os.ReadFile(matches[0])
+		if err != nil {
+			t.Fatalf("read report: %v", err)
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+
+	// Repeated runs of the same input must produce identical, sorted ordering.
+	for i := 0; i < 50; i++ {
+		conflict := SubjectConflict{SubjectKey: "s1", SourceFileNames: append([]string(nil), sources...)}
+		got := readReport(t, conflict)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("run %d: non-deterministic ordering: got=%v want=%v", i, got, want)
+		}
+	}
+
+	// Reordered input must produce identical ordering.
+	reordered := []string{
+		"d_S1_L001_R1_001.fastq.gz",
+		"n_S1_L001_R1_001.fastq.gz",
+		"c_S1_L001_R1_001.fastq.gz",
+		"q_S1_L001_R1_001.fastq.gz",
+		"b_S1_L001_R1_001.fastq.gz",
+		"m_S1_L001_R1_001.fastq.gz",
+		"a_S1_L001_R1_001.fastq.gz",
+		"z_S1_L001_R1_001.fastq.gz",
+	}
+	got := readReport(t, SubjectConflict{SubjectKey: "s1", SourceFileNames: reordered})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reordered input produced different ordering: got=%v want=%v", got, want)
+	}
+}
+
+// P2-B regression (unit level): a generated invalid_files_<timestamp>.txt report must be
+// excluded from a source scan when the "invalid_files_*" prefix exclusion is supplied,
+// so it cannot be re-ingested as a SOURCE input on a subsequent scan of the same dir.
+func TestListFilesExclude_ExcludesGeneratedInvalidReport(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"sample1_S1_L001_R1_001.fastq.gz",  // real source
+		"invalid_files_20260916120000.txt", // generated report (must be excluded)
+		"invalid_files",                    // bare (must be excluded)
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(""), 0600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	files, err := ListFilesExclude(dir, []string{"rule.json", "invalid_files", "invalid_files_*", "fileblock.csv", "*.pb"})
+	if err != nil {
+		t.Fatalf("ListFilesExclude error: %v", err)
+	}
+	if len(files) != 1 || files[0] != "sample1_S1_L001_R1_001.fastq.gz" {
+		t.Fatalf("expected generated invalid report excluded, got %v", files)
+	}
+}
+
 func TestExportResultsCSV(t *testing.T) {
 	dir := t.TempDir()
 	result := map[int]map[string]string{

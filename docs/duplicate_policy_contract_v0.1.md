@@ -1,4 +1,10 @@
 # Track A / A-2 Duplicate Policy Minimum Contract v0.1
+
+> **SUPERSEDED (TDI-I12):** 이 문서의 whole-group fail-fast posture(배치 전체를
+> `DuplicateCollisionError`로 중단)는 더 이상 canonical 동작이 아니다. canonical publication /
+> projection 동작은 subject-scoped conflict isolation으로 대체되었다 —
+> `docs/duplicate_policy_contract_v0.2.md` 참조. 본 문서는 역사적 기준선으로만 보존한다.
+
 ### 상태: 최소 구현 contract (`rules.GroupFiles`) 반영됨
 ### 기준선: A-1 current behavior freeze + A-2 duplicate policy design
 
