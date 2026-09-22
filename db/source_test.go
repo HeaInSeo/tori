@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TDI-I2A acceptance suite: the durable source envelope must keep three things apart
@@ -254,6 +256,74 @@ func TestI2A_CredentialRotationKeepsSourceIDAndRevision(t *testing.T) {
 	}
 	if revisions != 1 {
 		t.Errorf("revision count = %d, want 1 (rotation must not mint a revision)", revisions)
+	}
+}
+
+// I2A-T03c: GetSourceEnvelope must return a revision and an endpoint that were current
+// at the same moment. EnsureSourceEnvelope moves both pointers in one transaction, so a
+// read that interleaves with it must see both moves or neither — never the old revision
+// with the new endpoint. The hook runs the writer between the two pointer reads, the
+// only place a torn read can show. It waits long enough for an unblocked writer to
+// commit. With one read snapshot, the writer's commit waits for the read to finish.
+func TestI2A_GetSourceEnvelopeReadsOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	conn := newAcceptanceDB(t)
+
+	before := ensureEnvelope(t, conn, root, "ref-a", nil, acceptanceExclusions)
+
+	// The concurrent change moves both pointers: a new scope and a rotated reference.
+	rotated := "ref-b"
+	widened := append(append([]string{}, acceptanceExclusions...), "*.bam")
+	writerDone := make(chan error, 1)
+	// Fire only for the first caller, which is the read under test. The writer passes
+	// through this hook too, inside its own transaction, and must not be held up there:
+	// that would keep it from committing and hide a torn read.
+	var fired atomic.Bool
+	testHookBetweenPointerReads = func() {
+		if !fired.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			_, err := EnsureSourceEnvelope(ctx, conn, SourceEnvelopeInput{
+				RootDir:         root,
+				CredentialRef:   rotated,
+				FilesExclusions: widened,
+			})
+			writerDone <- err
+		}()
+		select {
+		case err := <-writerDone:
+			writerDone <- err // committed while the read was open; keep the result
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	t.Cleanup(func() { testHookBetweenPointerReads = nil })
+
+	got, ok, err := GetSourceEnvelope(ctx, conn)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope during concurrent change: ok=%v err=%v", ok, err)
+	}
+	if werr := <-writerDone; werr != nil {
+		t.Fatalf("concurrent EnsureSourceEnvelope: %v", werr)
+	}
+	testHookBetweenPointerReads = nil
+
+	after, ok, err := GetSourceEnvelope(ctx, conn)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope after concurrent change: ok=%v err=%v", ok, err)
+	}
+	if after.CurrentRevisionID == before.CurrentRevisionID || after.CurrentEndpointID == before.CurrentEndpointID {
+		t.Fatalf("setup: the concurrent change must move both pointers (before %s/%s, after %s/%s)",
+			before.CurrentRevisionID, before.CurrentEndpointID, after.CurrentRevisionID, after.CurrentEndpointID)
+	}
+
+	sawBefore := got.CurrentRevisionID == before.CurrentRevisionID && got.CurrentEndpointID == before.CurrentEndpointID
+	sawAfter := got.CurrentRevisionID == after.CurrentRevisionID && got.CurrentEndpointID == after.CurrentEndpointID
+	if !sawBefore && !sawAfter {
+		t.Errorf("torn read: revision %s with endpoint %s were never current together "+
+			"(before %s/%s, after %s/%s)", got.CurrentRevisionID, got.CurrentEndpointID,
+			before.CurrentRevisionID, before.CurrentEndpointID, after.CurrentRevisionID, after.CurrentEndpointID)
 	}
 }
 

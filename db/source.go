@@ -372,17 +372,47 @@ func EnsureSourceEnvelope(ctx context.Context, db *sql.DB, in SourceEnvelopeInpu
 	return env, nil
 }
 
-// GetSourceEnvelope returns the recorded envelope and whether one exists. It is
-// read-only: a DB that has never established an envelope stays untouched.
+// GetSourceEnvelope returns the recorded envelope and whether one exists. It never
+// establishes an envelope, though it does create the empty source tables if they are
+// missing.
+//
+// The envelope row and its two current pointers are three separate reads, and
+// EnsureSourceEnvelope can move both pointers in one transaction. Read as autocommit
+// statements, they could pair a revision with an endpoint that were never current
+// together. Reading them in one transaction gives all three the same snapshot.
 func GetSourceEnvelope(ctx context.Context, db *sql.DB) (SourceEnvelope, bool, error) {
 	if err := ensureSourceTables(ctx, db); err != nil {
 		return SourceEnvelope{}, false, err
 	}
-	return getSourceEnvelopeTx(ctx, db)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return SourceEnvelope{}, false, fmt.Errorf("failed to begin source envelope read: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	env, ok, err := getSourceEnvelopeTx(ctx, tx)
+	if err != nil {
+		return SourceEnvelope{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return SourceEnvelope{}, false, fmt.Errorf("failed to finish source envelope read: %w", err)
+	}
+	committed = true
+	return env, ok, nil
 }
 
+// testHookBetweenPointerReads, when set by a test, runs after the current revision is
+// read and before the current endpoint is. It lets a test put a concurrent writer in the
+// one place a torn read would show. Always nil outside tests.
+var testHookBetweenPointerReads func()
+
 // getSourceEnvelopeTx reads the envelope row plus the two current pointers. The caller
-// must already have ensured the tables exist.
+// must already have ensured the tables exist, and must pass a transaction if the three
+// reads have to agree (see GetSourceEnvelope).
 func getSourceEnvelopeTx(ctx context.Context, e sqlDBTX) (SourceEnvelope, bool, error) {
 	var (
 		env      SourceEnvelope
@@ -404,6 +434,10 @@ func getSourceEnvelopeTx(ctx context.Context, e sqlDBTX) (SourceEnvelope, bool, 
 		return SourceEnvelope{}, false, err
 	}
 	env.CurrentRevisionID = rev
+
+	if testHookBetweenPointerReads != nil {
+		testHookBetweenPointerReads()
+	}
 
 	ep, _, err := metaGet(ctx, e, metaKeySourceCurrentEndpoint)
 	if err != nil {
