@@ -339,9 +339,15 @@ func TestI2A_LegacyBootstrapIsDurableIdempotentAndHonest(t *testing.T) {
 	conn := newAcceptanceDB(t)
 
 	// Pre-I2A state: accepted inventory exists, no envelope has ever been established.
+	// SaveFolders alone would leave a seed_only (never accepted) seed, which is a bootstrap
+	// — see TestI2A_FreshSeedOnlyInventoryBootstraps — so record the provenance an
+	// inventory accepted before I2A carries.
 	writeRuleFolder(t, root, "legacy", pairFiles("L")...)
 	if err := SaveFolders(ctx, conn, root, nil, acceptanceExclusions); err != nil {
 		t.Fatalf("SaveFolders: %v", err)
+	}
+	if err := setProvenanceTx(ctx, conn, provenanceAccepted); err != nil {
+		t.Fatalf("record accepted provenance: %v", err)
 	}
 	if _, ok, err := GetSourceEnvelope(ctx, conn); err != nil || ok {
 		t.Fatalf("precondition: expected no envelope yet, got ok=%v err=%v", ok, err)
@@ -392,6 +398,65 @@ func TestI2A_LegacyBootstrapIsDurableIdempotentAndHonest(t *testing.T) {
 	}
 	if fresh.SourceID == adopted.SourceID {
 		t.Error("two independent sources were minted the same SourceID")
+	}
+}
+
+// I2A-T04c: the normal CLI flow seeds with SaveFolders before its first SyncFolders. That
+// fresh seed has folder rows but was never accepted (provenance seed_only), so the
+// envelope minted on the first sync is an honest bootstrap. Classifying by row count alone
+// labeled it legacy-adopted with InventoryPredatesID=true, permanently. A DB with rows and
+// no provenance at all (pre-v0.3) must still adopt as legacy: fail-closed is unchanged.
+func TestI2A_FreshSeedOnlyInventoryBootstraps(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	conn := newAcceptanceDB(t)
+
+	writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	if err := SaveFolders(ctx, conn, root, nil, acceptanceExclusions); err != nil {
+		t.Fatalf("SaveFolders: %v", err)
+	}
+	if p, ok, err := getProvenance(ctx, conn); err != nil || !ok || p != provenanceSeedOnly {
+		t.Fatalf("precondition: provenance = %q ok=%v err=%v, want %q", p, ok, err, provenanceSeedOnly)
+	}
+	if empty, err := acceptedInventoryEmpty(conn); err != nil || empty {
+		t.Fatalf("precondition: seed must hold folder rows (empty=%v err=%v)", empty, err)
+	}
+
+	// The production order: first SyncFolders after the seed establishes the envelope.
+	res, err := SyncFolders(ctx, conn, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Scope != ScopeConfirmed {
+		t.Fatalf("scope = %s, want CONFIRMED: %s", res.Scope, res.Reason)
+	}
+	env, ok, err := GetSourceEnvelope(ctx, conn)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope: ok=%v err=%v", ok, err)
+	}
+	if env.AdoptionOrigin != originBootstrap {
+		t.Errorf("adoption origin = %q, want %q (a never-accepted seed is not legacy inventory)",
+			env.AdoptionOrigin, originBootstrap)
+	}
+	if env.InventoryPredatesID {
+		t.Error("InventoryPredatesID = true for a fresh seed_only inventory")
+	}
+
+	// Contrast: rows with no recorded provenance (pre-v0.3) are never inferred to be a seed.
+	legacyRoot := t.TempDir()
+	legacyConn := newAcceptanceDB(t)
+	writeRuleFolder(t, legacyRoot, "legacy", pairFiles("L")...)
+	if err := SaveFolders(ctx, legacyConn, legacyRoot, nil, acceptanceExclusions); err != nil {
+		t.Fatalf("SaveFolders (legacy): %v", err)
+	}
+	if _, err := legacyConn.ExecContext(ctx,
+		"DELETE FROM snapshot_meta WHERE key = ?", metaKeyAcceptanceProvenance); err != nil {
+		t.Fatalf("drop provenance to model a pre-v0.3 DB: %v", err)
+	}
+	legacy := ensureEnvelope(t, legacyConn, legacyRoot, "", nil, acceptanceExclusions)
+	if legacy.AdoptionOrigin != originLegacyAdopted || !legacy.InventoryPredatesID {
+		t.Errorf("rows without provenance adopted as origin=%q predates=%v, want %q/true",
+			legacy.AdoptionOrigin, legacy.InventoryPredatesID, originLegacyAdopted)
 	}
 }
 

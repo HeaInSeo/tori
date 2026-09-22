@@ -225,8 +225,8 @@ func ensureSourceTables(ctx context.Context, e sqlDBTX) error {
 //
 // Behavior:
 //   - no envelope yet → mint one SourceID. inventoryPredatesID decides the adoption
-//     origin: an empty accepted inventory is an honest bootstrap; a non-empty one is a
-//     legacy adoption and is recorded as such.
+//     origin: an empty inventory or a seed_only (never accepted) seed is an honest
+//     bootstrap; any other non-empty inventory is a legacy adoption and is recorded as such.
 //   - semantics changed → append a NEW revision and move the current-revision pointer.
 //     The prior revision row is left exactly as it was.
 //   - endpoint changed (relocation and/or credential rotation) → append a new endpoint
@@ -239,6 +239,17 @@ func EnsureSourceEnvelope(ctx context.Context, db *sql.DB, in SourceEnvelopeInpu
 	if err != nil {
 		return SourceEnvelope{}, err
 	}
+	// Folder rows alone do not mean accepted inventory: the normal CLI flow seeds them
+	// with SaveFolders before the first SyncFolders, and that fresh, never-accepted seed is
+	// recorded as seed_only. The acceptance provenance is the authority that tells it apart
+	// from an inventory accepted before this identity existed (see provenance.go). Any other
+	// state with rows — accepted, unknown_legacy, or no provenance at all — stays a legacy
+	// adoption, so the fail-closed default is unchanged.
+	provenance, _, err := getProvenance(ctx, db)
+	if err != nil {
+		return SourceEnvelope{}, err
+	}
+	inventoryPredatesID := !inventoryEmpty && provenance != provenanceSeedOnly
 	witness, _, err := metaGet(ctx, db, metaKeySourceWitness)
 	if err != nil {
 		return SourceEnvelope{}, err
@@ -280,7 +291,7 @@ func EnsureSourceEnvelope(ctx context.Context, db *sql.DB, in SourceEnvelopeInpu
 		env = SourceEnvelope{
 			SourceID:            sourceID,
 			AdoptionOrigin:      originBootstrap,
-			InventoryPredatesID: !inventoryEmpty,
+			InventoryPredatesID: inventoryPredatesID,
 		}
 		if env.InventoryPredatesID {
 			// Accepted inventory already existed when this identity was minted. Record the

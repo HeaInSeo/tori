@@ -196,6 +196,126 @@ func TestGetDataBlockWithNewerTimestampReturnsError(t *testing.T) {
 	}
 }
 
+// TDI-I2A service-path regressions. The db package tests call db.SyncFolders with the
+// arguments chosen by the test; these drive DataBlockCliService itself, so they fail if
+// the service stops passing a configured value through.
+
+// sourceEnvelope reads the envelope the service path persisted.
+func sourceEnvelope(t *testing.T, svc *DataBlockCliService) d.SourceEnvelope {
+	t.Helper()
+	env, ok, err := d.GetSourceEnvelope(context.Background(), svc.db)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope: ok=%v err=%v", ok, err)
+	}
+	return env
+}
+
+func TestServiceSyncFoldersAppliesConfiguredFolderExclusions(t *testing.T) {
+	svc, rootDir := newTestDataBlockService(t)
+	ctx := context.Background()
+
+	excluded := filepath.Join(rootDir, "excluded_set")
+	if err := os.MkdirAll(excluded, 0o755); err != nil {
+		t.Fatalf("mkdir excluded_set: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(excluded, "stray.fastq.gz"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write excluded fixture: %v", err)
+	}
+	svc.cfg.FoldersExclusions = []string{"excluded_set"}
+
+	if err := svc.SaveFolders(ctx); err != nil {
+		t.Fatalf("SaveFolders error: %v", err)
+	}
+	if _, err := svc.SyncFolders(ctx); err != nil {
+		t.Fatalf("SyncFolders error: %v", err)
+	}
+
+	// Observation honors the configured scope.
+	folders, err := d.GetFoldersFromDB(svc.db)
+	if err != nil {
+		t.Fatalf("GetFoldersFromDB: %v", err)
+	}
+	for _, f := range folders {
+		if filepath.Base(f.Path) == "excluded_set" {
+			t.Fatalf("configured folder exclusion was ignored: %s is in the inventory", f.Path)
+		}
+	}
+
+	// The persisted semantic revision carries the configured scope.
+	first := sourceEnvelope(t, svc)
+	canonical, ok, err := d.SourceRevisionCanonical(ctx, svc.db, first.SourceID, first.CurrentRevisionID)
+	if err != nil || !ok {
+		t.Fatalf("SourceRevisionCanonical: ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(canonical, "excluded_set") {
+		t.Fatalf("revision does not record the configured folder exclusion: %s", canonical)
+	}
+
+	// A normal CLI seed (SaveFolders before the first sync) is a fresh bootstrap, not a
+	// legacy adoption.
+	if first.AdoptionOrigin != "bootstrap" || first.InventoryPredatesID {
+		t.Errorf("seeded service flow adopted as origin=%q predates=%v, want bootstrap/false",
+			first.AdoptionOrigin, first.InventoryPredatesID)
+	}
+
+	// Editing the configured folder scope mints a new revision on the same SourceID.
+	svc.cfg.FoldersExclusions = append(svc.cfg.FoldersExclusions, "scratch")
+	if _, err := svc.SyncFolders(ctx); err != nil {
+		t.Fatalf("SyncFolders after scope edit: %v", err)
+	}
+	second := sourceEnvelope(t, svc)
+	if second.SourceID != first.SourceID {
+		t.Errorf("scope edit changed SourceID: %s → %s", first.SourceID, second.SourceID)
+	}
+	if second.CurrentRevisionID == first.CurrentRevisionID {
+		t.Fatalf("editing the configured folder exclusions did not mint a revision (still %s)",
+			first.CurrentRevisionID)
+	}
+	n, err := d.CountSourceRevisions(ctx, svc.db, first.SourceID)
+	if err != nil {
+		t.Fatalf("CountSourceRevisions: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("revision count = %d, want 2", n)
+	}
+}
+
+func TestServiceSyncFoldersRecordsConfiguredCredentialRef(t *testing.T) {
+	svc, rootDir := newTestDataBlockService(t)
+	ctx := context.Background()
+
+	// Opaque references held in variables (gosec G101 flags credential-shaped literals
+	// assigned to credential fields; these are references, never secret material).
+	firstRef, rotatedRef := "service-ref-v1", "service-ref-v2"
+
+	svc.cfg.AccessCredentialRef = firstRef
+	if err := svc.SaveFolders(ctx); err != nil {
+		t.Fatalf("SaveFolders error: %v", err)
+	}
+	if _, err := svc.SyncFolders(ctx); err != nil {
+		t.Fatalf("SyncFolders error: %v", err)
+	}
+	before := sourceEnvelope(t, svc)
+
+	svc.cfg.AccessCredentialRef = rotatedRef
+	if _, err := svc.SyncFolders(ctx); err != nil {
+		t.Fatalf("SyncFolders after rotation: %v", err)
+	}
+	after := sourceEnvelope(t, svc)
+
+	_, want, err := d.SourceAccessEndpoint{RootDir: rootDir, CredentialRef: rotatedRef}.EndpointID()
+	if err != nil {
+		t.Fatalf("EndpointID: %v", err)
+	}
+	if after.CurrentEndpointID != want {
+		t.Errorf("service path did not carry the configured credential ref: endpoint %s, want %s",
+			after.CurrentEndpointID, want)
+	}
+	if after.SourceID != before.SourceID || after.CurrentRevisionID != before.CurrentRevisionID {
+		t.Errorf("credential rotation moved identity or meaning: %+v → %+v", before, after)
+	}
+}
+
 func TestSaveFoldersAndSyncFoldersGenerateDataBlock(t *testing.T) {
 	svc, rootDir := newTestDataBlockService(t)
 	ctx := context.Background()
