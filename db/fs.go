@@ -83,13 +83,25 @@ func GetCurrentFolderFileInfo(dirPath string, exclusions []string) (Folder, []Fi
 	fileCount := int64(0)
 
 	// excludeFiles 는 dirName 이 exclusions 목록에 있는 항목과 정확히 일치하거나,
-	// 만약 exclusions 항목이 "*.확장자" 형태이면, dirName 에 해당 확장자가 포함되어 있으면 true 를 반환함.
+	// 만약 exclusions 항목이 "*.확장자" 형태이면 dirName 에 해당 확장자가 포함되어 있거나,
+	// "접두사*" 형태이면 dirName 이 그 접두사로 시작하면 true 를 반환함.
+	//
+	// 접두사 형태는 projection 층(rules/block)이 생성하는 타임스탬프 리포트
+	// invalid_files_<ts>.txt 를 관측 대상에서 제외하기 위해 필요하다. 이 관측자가
+	// 리포트를 source 로 다시 수집하면 다음 SyncFolders 가 또 갱신을 만들어
+	// 카탈로그가 unchanged 로 수렴하지 못한다. 패턴 의미는 rules.ListFilesExclude
+	// 와 동일하게 유지해야 두 층의 제외 계약이 어긋나지 않는다.
 	excludeFiles := func(fileName string, exclusions []string) bool {
 		for _, ex := range exclusions {
 			// 패턴이 "*.<ext>" 형식이면, 해당 확장자가 dirName 내에 존재하는지 확인함.
 			if strings.HasPrefix(ex, "*.") {
 				ext := ex[1:] // 예: "*.pb" -> ext 는 ".pb"
 				if strings.Contains(fileName, ext) {
+					return true
+				}
+			} else if strings.HasSuffix(ex, "*") {
+				prefix := ex[:len(ex)-1] // 예: "invalid_files_*" -> prefix 는 "invalid_files_"
+				if strings.HasPrefix(fileName, prefix) {
 					return true
 				}
 			} else {

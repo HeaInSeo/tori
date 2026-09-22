@@ -216,13 +216,19 @@ recovery-time destructive prune would risk the landed I1 guarantee that *absence
 silently wipe accepted inventory*. A permanent-removal authority and recovery-prune
 convergence are deferred to a separate follow-up design/packet.
 
-## Known deferred item
+## Resolved: generated conflict report re-entering observation
 
 Projection generation (`rules`/`block`) emits its own side-files. `fileblock.csv`
-and `*files.pb` are excluded by the default exclusions, but invalid-row folders
-emit a timestamped `invalid_files_<ts>.txt` that the default exclusions do **not**
-match (the exact-match `"invalid_files"` entry predates the timestamped name). Such
-a folder would keep producing a tracked artifact, so the boundary would never
-settle to `unchanged` for it. This is a pre-existing defect in the projection/rules
-layer (outside this boundary's code surface) and is left for a follow-up that owns
-`rules`/exclusion semantics.
+and `*files.pb` are excluded by the default exclusions. Invalid-row folders also
+emit a timestamped `invalid_files_<ts>.txt`, which the default exclusions did
+**not** match (the exact-match `"invalid_files"` entry predates the timestamped
+name). Such a folder kept producing a tracked artifact, so the boundary never
+settled to `unchanged` for it.
+
+This is now closed. `GetCurrentFolderFileInfo` understands the same `prefix*`
+pattern form as `rules.ListFilesExclude`, and the shipped defaults
+(`config/config.go`, `config/config.json`) carry `"invalid_files_*"`. Both layers
+therefore exclude the generated report by the same contract, and a duplicate
+driven through `SyncFolders` converges to `unchanged`. Regression:
+`db/conflict_report_observation_test.go` (end-to-end convergence + exclusion
+pattern boundaries, including the names that must NOT be excluded).

@@ -1,4 +1,4 @@
 {
   "rootDir": "/test/",
-  "filesExclusions": ["*.json", "invalid_files", "*.csv", "*.pb"]
+  "filesExclusions": ["*.json", "invalid_files", "invalid_files_*", "*.csv", "*.pb"]
 }

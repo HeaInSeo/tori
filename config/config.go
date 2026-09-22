@@ -13,7 +13,7 @@ import (
 type Config struct {
 	RootDir           string   `json:"rootDir"`           // lustre-client 마운트된 폴더로 사용할 예정.
 	FoldersExclusions []string `json:"foldersExclusions"` // 제외할 폴더들.
-	FilesExclusions   []string `json:"filesExclusions"`   // ["*.json", "invalid_files", "*.csv", "*.pb"]
+	FilesExclusions   []string `json:"filesExclusions"`   // ["*.json", "invalid_files", "invalid_files_*", "*.csv", "*.pb"]
 }
 
 var (
@@ -61,7 +61,10 @@ func LoadConfig(filename string) (cfg *Config, err error) {
 
 	// Exclusions 가 비어있으면 기본값 설정
 	if len(config.FilesExclusions) == 0 {
-		config.FilesExclusions = []string{"*.json", "invalid_files", "*.csv", "*.pb"}
+		// "invalid_files_*" 는 projection 층이 만드는 invalid_files_<ts>.txt 리포트를
+		// 관측에서 제외한다. 정확 일치 항목 "invalid_files" 는 타임스탬프 이름이
+		// 생기기 전 값이라 단독으로는 리포트를 걸러내지 못한다.
+		config.FilesExclusions = []string{"*.json", "invalid_files", "invalid_files_*", "*.csv", "*.pb"}
 	}
 
 	return &config, nil
