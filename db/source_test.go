@@ -53,11 +53,14 @@ func TestI2A_EndpointRelocationRetainsSourceID(t *testing.T) {
 		t.Fatalf("baseline envelope incomplete: %+v", before)
 	}
 
-	// Relocate: same content, same continuity witness, different mounted path. Drive it
-	// through SyncFolders so the move is adopted only after observe() actually PROVES
+	// An actual filesystem relocation: the same directory — contents, rule files and
+	// continuity witness included — now lives at a different path. The move is then
+	// driven through SyncFolders, so it is adopted only after observe() actually PROVES
 	// continuity, exactly as in production.
-	newRoot := t.TempDir()
-	copyTreeForTest(t, oldRoot, newRoot)
+	newRoot := filepath.Join(t.TempDir(), "relocated")
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		t.Fatalf("relocate %s → %s: %v", oldRoot, newRoot, err)
+	}
 
 	res, err := SyncFolders(ctx, conn, newRoot, nil, acceptanceExclusions)
 	if err != nil {
@@ -468,30 +471,3 @@ func TestI2A_EstablishCreatesNoPublicationIdentity(t *testing.T) {
 	}
 }
 
-// copyTreeForTest mirrors a source root (including the continuity witness marker) into
-// dst, so a relocation test presents the SAME proven source at a new path.
-func copyTreeForTest(t *testing.T, src, dst string) {
-	t.Helper()
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatalf("read %s: %v", src, err)
-	}
-	for _, e := range entries {
-		srcPath := filepath.Join(src, e.Name())
-		dstPath := filepath.Join(dst, e.Name())
-		if e.IsDir() {
-			if err := os.MkdirAll(dstPath, 0o750); err != nil {
-				t.Fatalf("mkdir %s: %v", dstPath, err)
-			}
-			copyTreeForTest(t, srcPath, dstPath)
-			continue
-		}
-		data, err := os.ReadFile(srcPath) //nolint:gosec // test fixture under t.TempDir()
-		if err != nil {
-			t.Fatalf("read %s: %v", srcPath, err)
-		}
-		if err := os.WriteFile(dstPath, data, 0o600); err != nil {
-			t.Fatalf("write %s: %v", dstPath, err)
-		}
-	}
-}
