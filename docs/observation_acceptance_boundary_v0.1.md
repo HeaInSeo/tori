@@ -104,10 +104,15 @@ boundary).
 
 - `datablock.pb` is a **generated projection** of the accepted DB, not a canonical
   Tori "Generation" identity.
-- This is **not** a platform-level source-identity authority: no
-  SourceID/SourceRevision/Generation schema, no immutable Generation/publication
-  tables, no remote-object (S3/GCS/Azure) adapters, no per-file SHA-256, no
-  rename/copy/replica equivalence.
+- This is **not** a platform-level source-identity authority. TDI-I2A does add a
+  repo-local `SourceID`/`SourceRevision`/`SourceAccessEndpoint` schema (`db/source.go`,
+  described above), so that part is no longer a non-claim; what remains out of scope is
+  everything above it: no immutable Generation/publication identity or tables, no
+  remote-object (S3/GCS/Azure) adapters, no per-file SHA-256, no rename/copy/replica
+  equivalence, and no cross-deployment authority over who may assert a SourceID.
+- The I2A envelope is **record-only** at this boundary: it is established during sync but
+  is not read back into any acceptance decision, so it changes no acceptance outcome.
+  Consumption is TDI-I2B.
 - The witness proves *repo-local continuity* for the local/shared POSIX profile
   only.
 
@@ -196,8 +201,9 @@ Two related fail-closed refinements at the acceptance boundary:
   **and has no accepted basis** is surfaced as an unverifiable-basis `reclassify-hold`, not
   skipped as if out-of-scope and not returned as ordinary `unchanged` or a raw error.
 
-This is provenance of acceptance-state history only — not a SourceID/Generation/publication
-authority.
+This is provenance of acceptance-state history only. It is a separate record from the I2A
+source envelope: it does not establish, carry or authorize `SourceID`/`SourceRevision`, and
+it is not a Generation/publication authority.
 
 ## Known limitation — permanent-removal + drift convergence (centrally accepted)
 

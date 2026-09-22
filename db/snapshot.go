@@ -28,7 +28,17 @@ import (
 // accepted: a pending acceptance is detected and reconciled (rebuild-from-DB)
 // before any "unchanged" is returned. datablock.pb is a generated projection of
 // the accepted DB, not a canonical snapshot identity on its own.
-func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclusions, filesExclusions []string) (SyncResult, error) {
+//
+// TDI-I2A: optional SyncOption values carry physical-access attributes that belong to the
+// source access endpoint (see db/source.go). They are deliberately variadic so that adding
+// an access attribute is never a semantic-scope change and never forces every existing
+// caller to restate one.
+func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclusions, filesExclusions []string, opts ...SyncOption) (SyncResult, error) {
+	var syncOpts syncOptions
+	for _, opt := range opts {
+		opt(&syncOpts)
+	}
+
 	// 1) Observe + classify BEFORE any mutation.
 	res, err := observe(ctx, db, rootPath, foldersExclusions, filesExclusions)
 	if err != nil {
@@ -59,13 +69,19 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	//
 	//     RECORD-ONLY. It establishes state for acceptance to consume later (I2B); it
 	//     does not read the envelope back into any decision below, so no acceptance
-	//     outcome changes. CredentialRef is empty at this seam: the POSIX/shared-FS
-	//     profile reaches the root through the mount itself, and callers with a real
-	//     credential handle use EnsureSourceEnvelope directly.
+	//     outcome changes.
+	//
+	//     CredentialRef comes from the caller's configured access credential reference
+	//     (WithAccessCredentialRef). The POSIX/shared-FS profile reaches the root through
+	//     the mount and leaves it empty, but a profile that does configure one must have
+	//     it recorded HERE, on the normal sync path — otherwise rotating the configured
+	//     reference would silently leave CurrentEndpointID unchanged and contradict the
+	//     endpoint contract this packet establishes.
 	if _, err := EnsureSourceEnvelope(ctx, db, SourceEnvelopeInput{
 		RootDir:           rootPath,
 		FoldersExclusions: foldersExclusions,
 		FilesExclusions:   filesExclusions,
+		CredentialRef:     syncOpts.accessCredentialRef,
 	}); err != nil {
 		globallog.Log.Errorf("source envelope 확립 실패: %v", err)
 		return SyncResult{}, err

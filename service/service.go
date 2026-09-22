@@ -81,8 +81,11 @@ func (s *DataBlockCliService) SaveFolders(ctx context.Context) error {
 }
 
 func (s *DataBlockCliService) SyncFolders(ctx context.Context) (dbUtils.SyncResult, error) {
-	// 디렉터리 경로와 파일 제외 패턴을 넘겨서 dbUtils 쪽으로 위임
-	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions)
+	// 디렉터리 경로와 파일 제외 패턴을 넘겨서 dbUtils 쪽으로 위임.
+	// TDI-I2A: 설정된 접근 크리덴셜 참조는 source access endpoint 속성이므로 이 정상
+	// 경로에서 함께 전달한다. 전달하지 않으면 설정 회전이 endpoint에 기록되지 않는다.
+	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions,
+		dbUtils.WithAccessCredentialRef(s.cfg.AccessCredentialRef))
 }
 
 // SaveDataBlockToTextFile DataBlockData 텍스트 포맷으로 파일에 저장

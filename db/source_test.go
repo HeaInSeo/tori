@@ -257,6 +257,73 @@ func TestI2A_CredentialRotationKeepsSourceIDAndRevision(t *testing.T) {
 	}
 }
 
+// I2A-T03b is the production-path half of T03. T03 proves that rotation is endpoint-only
+// when the caller hands EnsureSourceEnvelope the reference directly; that says nothing
+// about whether the normal CLI/service sync path ever passes one. Without this test,
+// `accessCredentialRef` could be rotated in config forever while CurrentEndpointID never
+// moved — the documented endpoint contract would hold in the unit test and be false in
+// production, which is the more dangerous of the two failures.
+func TestI2A_SyncFoldersRecordsConfiguredCredentialRef(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	conn := newAcceptanceDB(t)
+
+	writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	acceptBaseline(t, conn, root)
+
+	before, ok, err := GetSourceEnvelope(ctx, conn)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope after baseline: ok=%v err=%v", ok, err)
+	}
+
+	// Rotate the CONFIGURED reference and drive the normal sync path, exactly as
+	// DataBlockCliService.SyncFolders does.
+	res, err := SyncFolders(ctx, conn, root, nil, acceptanceExclusions,
+		WithAccessCredentialRef("secret-ref-v2"))
+	if err != nil {
+		t.Fatalf("SyncFolders with configured credential ref: %v", err)
+	}
+	if res.Scope != ScopeConfirmed {
+		t.Fatalf("scope = %s, want CONFIRMED: %s", res.Scope, res.Reason)
+	}
+
+	after, ok, err := GetSourceEnvelope(ctx, conn)
+	if err != nil || !ok {
+		t.Fatalf("GetSourceEnvelope after rotation: ok=%v err=%v", ok, err)
+	}
+
+	// The endpoint actually persisted must be the one derived from the configured
+	// reference — not merely "some new endpoint".
+	_, wantEndpoint, err := SourceAccessEndpoint{RootDir: root, CredentialRef: "secret-ref-v2"}.EndpointID()
+	if err != nil {
+		t.Fatalf("EndpointID: %v", err)
+	}
+	if after.CurrentEndpointID != wantEndpoint {
+		t.Errorf("SyncFolders did not carry the configured credential ref into the endpoint: got %s, want %s",
+			after.CurrentEndpointID, wantEndpoint)
+	}
+	if after.CurrentEndpointID == before.CurrentEndpointID {
+		t.Errorf("rotating the configured credential ref left the endpoint unchanged (%s)",
+			after.CurrentEndpointID)
+	}
+
+	// Rotation is still endpoint-only on this path.
+	if after.SourceID != before.SourceID {
+		t.Errorf("configured rotation changed SourceID: %s → %s", before.SourceID, after.SourceID)
+	}
+	if after.CurrentRevisionID != before.CurrentRevisionID {
+		t.Errorf("configured rotation changed the semantic revision: %s → %s",
+			before.CurrentRevisionID, after.CurrentRevisionID)
+	}
+	revisions, err := CountSourceRevisions(ctx, conn, after.SourceID)
+	if err != nil {
+		t.Fatalf("CountSourceRevisions: %v", err)
+	}
+	if revisions != 1 {
+		t.Errorf("revision count = %d, want 1 (rotation must not mint a revision)", revisions)
+	}
+}
+
 // I2A-T04: legacy RootDir bootstrap is durable and idempotent, and the migration
 // provenance is explicit — the minted SourceID must NOT claim to reach back over
 // inventory that already existed when it was minted.

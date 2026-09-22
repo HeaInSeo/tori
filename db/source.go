@@ -157,6 +157,23 @@ type SourceEnvelopeInput struct {
 	FilesExclusions   []string
 }
 
+// syncOptions holds the optional physical-access attributes a caller may supply to
+// SyncFolders. Only access-endpoint attributes belong here; semantic scope stays in the
+// explicit exclusion parameters so that a scope change is never expressible as an option.
+type syncOptions struct {
+	accessCredentialRef string
+}
+
+// SyncOption configures one optional access attribute for SyncFolders.
+type SyncOption func(*syncOptions)
+
+// WithAccessCredentialRef supplies the opaque reference to the credential used to reach
+// the root (never the secret material). Rotating it moves the recorded access endpoint and
+// leaves both SourceID and the semantic revision untouched.
+func WithAccessCredentialRef(ref string) SyncOption {
+	return func(o *syncOptions) { o.accessCredentialRef = ref }
+}
+
 // ensureSourceTables creates the envelope tables if absent. Idempotent and safe on every
 // access, matching the snapshot_meta / classification_semantics pattern, so pre-existing
 // DBs work without a migration step.
