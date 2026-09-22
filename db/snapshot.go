@@ -51,6 +51,26 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		return SyncResult{}, err
 	}
 
+	// 1b) TDI-I2A: establish/refresh the durable source envelope (logical SourceID,
+	//     immutable semantic revision, current physical access endpoint). This runs at
+	//     the same proven-continuity point as the witness backfill, so a wrong/empty
+	//     mount — already HELD by observe() above — can never be adopted as this
+	//     source's endpoint.
+	//
+	//     RECORD-ONLY. It establishes state for acceptance to consume later (I2B); it
+	//     does not read the envelope back into any decision below, so no acceptance
+	//     outcome changes. CredentialRef is empty at this seam: the POSIX/shared-FS
+	//     profile reaches the root through the mount itself, and callers with a real
+	//     credential handle use EnsureSourceEnvelope directly.
+	if _, err := EnsureSourceEnvelope(ctx, db, SourceEnvelopeInput{
+		RootDir:           rootPath,
+		FoldersExclusions: foldersExclusions,
+		FilesExclusions:   filesExclusions,
+	}); err != nil {
+		globallog.Log.Errorf("source envelope 확립 실패: %v", err)
+		return SyncResult{}, err
+	}
+
 	// TDI-I4F: compute the current source scope and freeze its rule bases ONCE, before any
 	// recovery/migration/mutation. The SAME frozen values drive drift comparison, legacy
 	// migration, and acceptance, so a rule cannot change between a "check" read and a

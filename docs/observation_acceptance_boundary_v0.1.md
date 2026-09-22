@@ -50,6 +50,15 @@ scope CONFIRMED + COMPLETE
   folder is missing, the source is refused (scope UNKNOWN → HOLD) rather than
   adopted, so a readable-but-wrong/empty mount can never wipe the accepted inventory.
 
+  **The witness is endpoint evidence, not identity (TDI-I2A).** It attests that the
+  path in front of us is still the same physical source we accepted from. It is
+  rotatable, it is re-minted on re-bootstrap, it lives in the source filesystem, and
+  it says nothing about observation *meaning*. It is therefore never used as the
+  `SourceID`: `db/source.go` mints a namespaced (`src-`) identity independently and
+  fails closed (`errWitnessAsSourceID`) if a witness token is ever found standing in
+  for it. The relationship runs one way — proven witness continuity is what allows an
+  endpoint change to be adopted under the *existing* `SourceID`.
+
 - **Coverage encoding: {Complete, Partial}.** Every in-scope subfolder must be
   fully readable before any mutation; an unreadable subfolder → Partial → HOLD.
 

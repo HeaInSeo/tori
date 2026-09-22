@@ -10,10 +10,29 @@ import (
 	globallog "github.com/HeaInSeo/tori/log"
 )
 
+// Config is the authored source configuration.
+//
+// TDI-I2A separates the two kinds of field here, because they carry different durability
+// meaning once persisted into the source envelope (db/source.go):
+//
+//   - PHYSICAL ACCESS (RootDir, AccessCredentialRef): how the source is reached right
+//     now. Editing these is an endpoint change — a mount move, a credential rotation, a
+//     proven failover. It does not change what is being observed, so it must never mint
+//     a new semantic revision.
+//   - SEMANTIC SCOPE (FoldersExclusions, FilesExclusions): what is inside the observation
+//     domain, i.e. observation meaning. Editing these DOES mint a new revision; the
+//     previous revision is retained, never rewritten in place.
 type Config struct {
 	RootDir           string   `json:"rootDir"`           // lustre-client 마운트된 폴더로 사용할 예정.
 	FoldersExclusions []string `json:"foldersExclusions"` // 제외할 폴더들.
 	FilesExclusions   []string `json:"filesExclusions"`   // ["*.json", "invalid_files", "invalid_files_*", "*.csv", "*.pb"]
+
+	// AccessCredentialRef is an OPAQUE REFERENCE to the credential used to reach RootDir
+	// (a key name, a secret reference) — never the secret material itself. It is optional:
+	// the current POSIX/shared-FS profile reaches the root through the mount and leaves it
+	// empty. It belongs to the access endpoint only, so rotating it changes the recorded
+	// endpoint and leaves both SourceID and the semantic revision untouched.
+	AccessCredentialRef string `json:"accessCredentialRef,omitempty"`
 }
 
 var (
