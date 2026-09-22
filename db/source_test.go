@@ -470,4 +470,3 @@ func TestI2A_EstablishCreatesNoPublicationIdentity(t *testing.T) {
 		t.Errorf("establishing the envelope wrote %d inventory row(s)", len(folders))
 	}
 }
-
