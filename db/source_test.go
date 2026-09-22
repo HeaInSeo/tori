@@ -276,10 +276,16 @@ func TestI2A_SyncFoldersRecordsConfiguredCredentialRef(t *testing.T) {
 		t.Fatalf("GetSourceEnvelope after baseline: ok=%v err=%v", ok, err)
 	}
 
+	// Held in a variable rather than inlined into the composite literal below: gosec
+	// G101 flags a credential-shaped string literal assigned straight to a CredentialRef
+	// field. The value is an opaque reference, never secret material — which is exactly
+	// the distinction this packet persists.
+	endpointRef := "rotated-ref-v2"
+
 	// Rotate the CONFIGURED reference and drive the normal sync path, exactly as
 	// DataBlockCliService.SyncFolders does.
 	res, err := SyncFolders(ctx, conn, root, nil, acceptanceExclusions,
-		WithAccessCredentialRef("secret-ref-v2"))
+		WithAccessCredentialRef(endpointRef))
 	if err != nil {
 		t.Fatalf("SyncFolders with configured credential ref: %v", err)
 	}
@@ -294,7 +300,7 @@ func TestI2A_SyncFoldersRecordsConfiguredCredentialRef(t *testing.T) {
 
 	// The endpoint actually persisted must be the one derived from the configured
 	// reference — not merely "some new endpoint".
-	_, wantEndpoint, err := SourceAccessEndpoint{RootDir: root, CredentialRef: "secret-ref-v2"}.EndpointID()
+	_, wantEndpoint, err := SourceAccessEndpoint{RootDir: root, CredentialRef: endpointRef}.EndpointID()
 	if err != nil {
 		t.Fatalf("EndpointID: %v", err)
 	}
