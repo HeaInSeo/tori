@@ -50,6 +50,15 @@ scope CONFIRMED + COMPLETE
   folder is missing, the source is refused (scope UNKNOWN → HOLD) rather than
   adopted, so a readable-but-wrong/empty mount can never wipe the accepted inventory.
 
+  **The witness is endpoint evidence, not identity (TDI-I2A).** It attests that the
+  path in front of us is still the same physical source we accepted from. It is
+  rotatable, it is re-minted on re-bootstrap, it lives in the source filesystem, and
+  it says nothing about observation *meaning*. It is therefore never used as the
+  `SourceID`: `db/source.go` mints a namespaced (`src-`) identity independently and
+  fails closed (`errWitnessAsSourceID`) if a witness token is ever found standing in
+  for it. The relationship runs one way — proven witness continuity is what allows an
+  endpoint change to be adopted under the *existing* `SourceID`.
+
 - **Coverage encoding: {Complete, Partial}.** Every in-scope subfolder must be
   fully readable before any mutation; an unreadable subfolder → Partial → HOLD.
 
@@ -95,10 +104,15 @@ boundary).
 
 - `datablock.pb` is a **generated projection** of the accepted DB, not a canonical
   Tori "Generation" identity.
-- This is **not** a platform-level source-identity authority: no
-  SourceID/SourceRevision/Generation schema, no immutable Generation/publication
-  tables, no remote-object (S3/GCS/Azure) adapters, no per-file SHA-256, no
-  rename/copy/replica equivalence.
+- This is **not** a platform-level source-identity authority. TDI-I2A does add a
+  repo-local `SourceID`/`SourceRevision`/`SourceAccessEndpoint` schema (`db/source.go`,
+  described above), so that part is no longer a non-claim; what remains out of scope is
+  everything above it: no immutable Generation/publication identity or tables, no
+  remote-object (S3/GCS/Azure) adapters, no per-file SHA-256, no rename/copy/replica
+  equivalence, and no cross-deployment authority over who may assert a SourceID.
+- The I2A envelope is **record-only** at this boundary: it is established during sync but
+  is not read back into any acceptance decision, so it changes no acceptance outcome.
+  Consumption is TDI-I2B.
 - The witness proves *repo-local continuity* for the local/shared POSIX profile
   only.
 
@@ -187,8 +201,9 @@ Two related fail-closed refinements at the acceptance boundary:
   **and has no accepted basis** is surfaced as an unverifiable-basis `reclassify-hold`, not
   skipped as if out-of-scope and not returned as ordinary `unchanged` or a raw error.
 
-This is provenance of acceptance-state history only — not a SourceID/Generation/publication
-authority.
+This is provenance of acceptance-state history only. It is a separate record from the I2A
+source envelope: it does not establish, carry or authorize `SourceID`/`SourceRevision`, and
+it is not a Generation/publication authority.
 
 ## Known limitation — permanent-removal + drift convergence (centrally accepted)
 

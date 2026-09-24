@@ -76,13 +76,20 @@ func (s *DataBlockCliService) GetDataBlock(ctx context.Context, updateAt *timest
 
 // SaveFolders 폴더 정보를 DB에 저장, TODO 이건 한번만 실행되어야 하는 메서드 임. 이름을 이러한 맥락을 고려해서 넣어 주어야 할듯
 func (s *DataBlockCliService) SaveFolders(ctx context.Context) error {
-	err := dbUtils.SaveFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions)
+	// seed도 SyncFolders와 같은 폴더/파일 제외 범위로 만든다. 다르면 첫 sync가 seed와 다른
+	// 범위를 관측한다.
+	err := dbUtils.SaveFolders(ctx, s.db, s.cfg.RootDir, s.cfg.FoldersExclusions, s.cfg.FilesExclusions)
 	return err
 }
 
 func (s *DataBlockCliService) SyncFolders(ctx context.Context) (dbUtils.SyncResult, error) {
-	// 디렉터리 경로와 파일 제외 패턴을 넘겨서 dbUtils 쪽으로 위임
-	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, nil, s.cfg.FilesExclusions)
+	// 디렉터리 경로와 폴더/파일 제외 패턴을 넘겨서 dbUtils 쪽으로 위임.
+	// TDI-I2A: 설정된 폴더 제외는 source semantic scope이므로 관측과 revision 양쪽에 그대로
+	// 전달한다. nil을 넘기면 제외 폴더를 계속 관측하고, 설정 편집이 revision을 만들지 않는다.
+	// 설정된 접근 크리덴셜 참조는 source access endpoint 속성이므로 이 정상 경로에서 함께
+	// 전달한다. 전달하지 않으면 설정 회전이 endpoint에 기록되지 않는다.
+	return dbUtils.SyncFolders(ctx, s.db, s.cfg.RootDir, s.cfg.FoldersExclusions, s.cfg.FilesExclusions,
+		dbUtils.WithAccessCredentialRef(s.cfg.AccessCredentialRef))
 }
 
 // SaveDataBlockToTextFile DataBlockData 텍스트 포맷으로 파일에 저장
