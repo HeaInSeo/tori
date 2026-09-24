@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -67,9 +68,10 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	//     mount — already HELD by observe() above — can never be adopted as this
 	//     source's endpoint.
 	//
-	//     RECORD-ONLY. It establishes state for acceptance to consume later (I2B); it
-	//     does not read the envelope back into any decision below, so no acceptance
-	//     outcome changes.
+	//     TDI-I2B: the returned envelope is the exact source basis (SourceID + current
+	//     SourceRevision + current endpoint) this observation runs under. Acceptance pins
+	//     it with the target version and recovery consumes the pinned basis (see
+	//     source_basis.go).
 	//
 	//     CredentialRef comes from the caller's configured access credential reference
 	//     (WithAccessCredentialRef). The POSIX/shared-FS profile reaches the root through
@@ -77,15 +79,18 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	//     it recorded HERE, on the normal sync path — otherwise rotating the configured
 	//     reference would silently leave CurrentEndpointID unchanged and contradict the
 	//     endpoint contract this packet establishes.
-	if _, err := EnsureSourceEnvelope(ctx, db, SourceEnvelopeInput{
+	env, err := EnsureSourceEnvelope(ctx, db, SourceEnvelopeInput{
 		RootDir:           rootPath,
 		FoldersExclusions: foldersExclusions,
 		FilesExclusions:   filesExclusions,
 		CredentialRef:     syncOpts.accessCredentialRef,
-	}); err != nil {
+	})
+	if err != nil {
 		globallog.Log.Errorf("source envelope 확립 실패: %v", err)
 		return SyncResult{}, err
 	}
+	cur := currentSourceBasis(env)
+	res.Source = cur
 
 	// TDI-I4F: compute the current source scope and freeze its rule bases ONCE, before any
 	// recovery/migration/mutation. The SAME frozen values drive drift comparison, legacy
@@ -124,6 +129,59 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	if err != nil {
 		return SyncResult{}, err
 	}
+
+	// 2b) TDI-I2B: every source basis this run may consume — the accepted version's and,
+	//     while pending, the target's — must resolve inside the current envelope. A pin
+	//     naming another SourceID, or a revision/endpoint the source never recorded, has
+	//     unclear authority: HOLD before recovery or acceptance can build on it.
+	//
+	//     Recovery then rebuilds under the observation scope of the PINNED revision (target
+	//     first, else accepted), never under the current config: a scope edit made while a
+	//     prior acceptance was in flight must not reinterpret that acceptance.
+	recoveryScope := inScope
+	{
+		acceptedVer, aErr := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+		if aErr != nil {
+			return SyncResult{}, aErr
+		}
+		versions := []int64{acceptedVer}
+		if state == acceptancePending {
+			targetVer, tErr := metaGetInt(ctx, db, metaKeyTargetVersion)
+			if tErr != nil {
+				return SyncResult{}, tErr
+			}
+			versions = []int64{targetVer, acceptedVer}
+		}
+		pinnedScopeSet := false
+		for _, v := range versions {
+			b, ok, gErr := getSourceBasis(ctx, db, v)
+			if gErr != nil {
+				return SyncResult{}, gErr
+			}
+			if !ok {
+				continue
+			}
+			if vErr := validateSourceBasis(ctx, db, env, b); vErr != nil {
+				if !errors.Is(vErr, errSourceBasisUnresolved) {
+					return SyncResult{}, vErr
+				}
+				res.Outcome = OutcomeDegradedHold
+				res.Scope = ScopeUnknown
+				res.Reason = fmt.Sprintf("source basis UNRESOLVED: %v; refusing to recover or accept on it", vErr)
+				globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+				return res, nil
+			}
+			if state == acceptancePending && !pinnedScopeSet {
+				scope, sErr := scopeForRevision(ctx, db, rootPath, b)
+				if sErr != nil {
+					return SyncResult{}, sErr
+				}
+				recoveryScope = scope
+				pinnedScopeSet = true
+			}
+		}
+	}
+
 	if state == acceptancePending {
 		targetVer, tErr := metaGetInt(ctx, db, metaKeyTargetVersion)
 		if tErr != nil {
@@ -133,7 +191,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		if aErr != nil {
 			return SyncResult{}, aErr
 		}
-		if hold, missing, hErr := pendingBasisHold(ctx, db, inScope, targetVer, acceptedVer); hErr != nil {
+		if hold, missing, hErr := pendingBasisHold(ctx, db, recoveryScope, targetVer, acceptedVer); hErr != nil {
 			return SyncResult{}, hErr
 		} else if hold {
 			res.Outcome = OutcomeReclassifyHold
@@ -145,8 +203,9 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 
 	// 3) Reconcile any incomplete prior acceptance BEFORE we can report "unchanged".
 	//    This closes I10: DB may have advanced while the projection stayed stale. The
-	//    rebuild now projects from the FROZEN target basis, never disk rule.json.
-	reconciled, err := reconcileIfPending(ctx, db, rootPath, inScope)
+	//    rebuild now projects from the FROZEN target basis, never disk rule.json, and
+	//    (TDI-I2B) under the pinned source revision's scope, never the current config.
+	reconciled, err := reconcileIfPending(ctx, db, rootPath, recoveryScope)
 	if err != nil {
 		globallog.Log.Errorf("reconcile 실패: %v", err)
 		return SyncResult{}, err
@@ -170,6 +229,26 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		res.Reason = reason
 		globallog.Log.Warnf("SyncFolders HOLD: %s", reason)
 		return res, nil
+	}
+
+	// 4b) TDI-I2B: the accepted snapshot's pinned source basis. A projection restore of the
+	//     ACCEPTED snapshot rebuilds under the scope of its pinned revision (acceptedScope),
+	//     not the current config. sourceChanged means the current observation runs under a
+	//     different SourceRevision than the accepted snapshot: adopting it is a NEW accepted
+	//     version with its own pin, never a rewrite of the accepted one.
+	acceptedPin, acceptedPinned, err := getSourceBasis(ctx, db, acceptedVer)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	acceptedScope := inScope
+	sourceChanged := false
+	if acceptedPinned && !acceptedPin.sameSource(cur) {
+		// Same revision means the same frozen scope, so the current enumeration already is
+		// the accepted scope; only a revision change needs the pinned scope re-enumerated.
+		sourceChanged = true
+		if acceptedScope, err = scopeForRevision(ctx, db, rootPath, acceptedPin); err != nil {
+			return SyncResult{}, err
+		}
 	}
 
 	// 5) TDI-I4F drift: a rule-only semantic change on an in-scope accepted folder must
@@ -207,7 +286,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 			// drift HOLD over an incomplete projection.
 			outputDatablock := filepath.Join(rootPath, "datablock.pb")
 			if _, statErr := os.Stat(outputDatablock); os.IsNotExist(statErr) {
-				restored, rErr := publishAcceptedProjection(ctx, db, rootPath, inScope)
+				restored, rErr := publishAcceptedProjection(ctx, db, rootPath, acceptedScope)
 				if rErr != nil {
 					return SyncResult{}, rErr
 				}
@@ -239,7 +318,27 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	projectionMissing := os.IsNotExist(statErr)
 	dataChanged := fDiff != nil || fChange != nil
 
-	if !dataChanged {
+	// A source revision change with no data change still falls through to acceptance: the
+	// accepted snapshot names R1, so reporting "unchanged" under R2 would silently treat it
+	// as R2. It is accepted as a new version pinned to R2; the R1 version keeps its pin.
+	if !dataChanged && !sourceChanged {
+		// A pre-I2B accepted snapshot has no source basis. The current revision reproduces
+		// its inventory exactly (no data diff), so adopting it is proven, not inferred;
+		// record the adoption as such. With a data diff it stays unpinned and the next
+		// acceptance pins a new version natively.
+		if !acceptedPinned {
+			if n, cErr := countSemanticsAtVersion(ctx, db, acceptedVer); cErr != nil {
+				return SyncResult{}, cErr
+			} else if n > 0 {
+				adopted := cur
+				adopted.Origin = sourceBasisLegacyAdopted
+				if pErr := pinSourceBasisTx(ctx, db, acceptedVer, adopted); pErr != nil {
+					return SyncResult{}, pErr
+				}
+				globallog.Log.Warnf("TDI-I2B: adopted source revision %s for pre-I2B accepted snapshot v%d (reproduces accepted inventory)",
+					shortRev(cur.RevisionID), acceptedVer)
+			}
+		}
 		if reconciled {
 			res.Outcome = OutcomeAcceptedUpdate
 			res.Reconcile = true
@@ -312,7 +411,7 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 
 	// 8) Accept: pending + frozen target basis (one tx) → atomic DB mutation →
 	//    projection rebuild from the pinned target basis → clean (promotes target basis).
-	complete, err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis, inScope)
+	complete, err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis, cur, inScope)
 	if err != nil {
 		globallog.Log.Errorf("acceptWork 실패: %v", err)
 		return SyncResult{}, err
@@ -336,6 +435,10 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 
 	res.Outcome = OutcomeAcceptedUpdate
 	res.Reconcile = reconciled
+	if sourceChanged {
+		res.Reason = fmt.Sprintf("source revision %s → %s accepted as a new snapshot version; the prior version keeps its pinned revision",
+			shortRev(acceptedPin.RevisionID), shortRev(cur.RevisionID))
+	}
 	return res, nil
 }
 
