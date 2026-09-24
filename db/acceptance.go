@@ -176,6 +176,9 @@ type SyncResult struct {
 	Coverage  Coverage
 	Reconcile bool   // an incomplete prior acceptance was reconciled this run
 	Reason    string // human-readable explanation, primarily for HOLD
+	// Source is the exact source basis (TDI-I2B) this observation ran under. It is empty
+	// when the run HELD before continuity was proven and no envelope was resolved.
+	Source SnapshotSourceBasis
 }
 
 // sqlDBTX is satisfied by both *sql.DB and *sql.Tx, so the small metadata helpers
@@ -593,7 +596,11 @@ func beginPending(ctx context.Context, db *sql.DB) (int64, error) {
 // with the pending transition, BEFORE any accepted DB row mutates: a crash after this
 // commit can only leave state=pending with a complete, resolvable target basis under
 // target_version, never a pending target with an indeterminate rule basis.
-func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folderBasis) (int64, error) {
+//
+// TDI-I2B: the exact source basis (SourceID + SourceRevision + endpoint) the target is
+// accepted under is pinned in the same transaction, so the classification basis and the
+// source basis of a version are never recorded apart. A zero srcBasis pins nothing.
+func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folderBasis, srcBasis SnapshotSourceBasis) (int64, error) {
 	accepted, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
 	if err != nil {
 		return 0, err
@@ -617,6 +624,11 @@ func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folder
 	}
 	for _, b := range targetBasis {
 		if err := pinSemanticsTx(ctx, tx, target, b); err != nil {
+			return 0, err
+		}
+	}
+	if srcBasis.SourceID != "" {
+		if err := pinSourceBasisTx(ctx, tx, target, srcBasis); err != nil {
 			return 0, err
 		}
 	}
@@ -752,6 +764,12 @@ func publishAcceptedProjection(ctx context.Context, db *sql.DB, rootPath string,
 	if err := carryForwardBasesToTarget(ctx, db, inScope, target, accepted); err != nil {
 		return false, err
 	}
+	// TDI-I2B: a recovery that rebuilt an unpinned target under the accepted source basis
+	// records that basis at the target before promotion, so the promoted version is not
+	// left without the source revision it was actually rebuilt under.
+	if err := carrySourceBasisForward(ctx, db, target, accepted); err != nil {
+		return false, err
+	}
 	if err := commitClean(ctx, db, target); err != nil {
 		return false, err
 	}
@@ -781,8 +799,8 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 // per-folder classification basis for every folder that will participate in the accepted
 // projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
 // invalid rule HOLDs before any DB row advances (TDI-I4F §5).
-func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, inScope map[string]struct{}) (complete bool, err error) {
-	if _, err = beginPendingWithBasis(ctx, db, targetBasis); err != nil {
+func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, srcBasis SnapshotSourceBasis, inScope map[string]struct{}) (complete bool, err error) {
+	if _, err = beginPendingWithBasis(ctx, db, targetBasis, srcBasis); err != nil {
 		return false, err
 	}
 	if len(diffs) > 0 || len(changes) > 0 {
