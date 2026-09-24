@@ -315,9 +315,9 @@ func TestI2B_AckLossRetryConvergesOnSamePin(t *testing.T) {
 // another SourceID (alias/union), or a revision the source never recorded.
 func TestI2B_UnresolvedPinHolds(t *testing.T) {
 	cases := map[string]string{
-		"foreign source id":     "UPDATE snapshot_source_basis SET source_id = 'src-someoneelse'",
-		"unrecorded revision":   "UPDATE snapshot_source_basis SET revision_id = 'deadbeef'",
-		"unrecorded endpoint":   "UPDATE snapshot_source_basis SET endpoint_id = 'deadbeef'",
+		"foreign source id":      "UPDATE snapshot_source_basis SET source_id = 'src-someoneelse'",
+		"unrecorded revision":    "UPDATE snapshot_source_basis SET revision_id = 'deadbeef'",
+		"unrecorded endpoint":    "UPDATE snapshot_source_basis SET endpoint_id = 'deadbeef'",
 		"foreign pending target": "",
 	}
 	for name, tamper := range cases {
@@ -334,8 +334,8 @@ func TestI2B_UnresolvedPinHolds(t *testing.T) {
 				// A pending target whose pin names another source.
 				pin := acceptedPinForTest(t, conn)
 				pin.SourceID = "src-someoneelse"
-				if _, err := beginPendingWithBasis(ctx, conn, nil, pin); err != nil {
-					t.Fatalf("beginPendingWithBasis: %v", err)
+				if _, err := beginPendingWithBases(ctx, conn, nil, pin); err != nil {
+					t.Fatalf("beginPendingWithBases: %v", err)
 				}
 			} else if _, err := conn.ExecContext(ctx, tamper); err != nil {
 				t.Fatalf("tamper: %v", err)

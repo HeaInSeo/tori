@@ -110,9 +110,9 @@ boundary).
   everything above it: no immutable Generation/publication identity or tables, no
   remote-object (S3/GCS/Azure) adapters, no per-file SHA-256, no rename/copy/replica
   equivalence, and no cross-deployment authority over who may assert a SourceID.
-- The I2A envelope is **record-only** at this boundary: it is established during sync but
-  is not read back into any acceptance decision, so it changes no acceptance outcome.
-  Consumption is TDI-I2B.
+- Since TDI-I2B each accepted snapshot version pins the exact source basis it was accepted
+  under, and recovery consumes that pin (see `source_envelope_design_note_v0.1.md`,
+  "Consumption"). This is still a repo-local compatibility record, not a Generation.
 - The witness proves *repo-local continuity* for the local/shared POSIX profile
   only.
 

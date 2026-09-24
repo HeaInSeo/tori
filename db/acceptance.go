@@ -596,11 +596,15 @@ func beginPending(ctx context.Context, db *sql.DB) (int64, error) {
 // with the pending transition, BEFORE any accepted DB row mutates: a crash after this
 // commit can only leave state=pending with a complete, resolvable target basis under
 // target_version, never a pending target with an indeterminate rule basis.
-//
-// TDI-I2B: the exact source basis (SourceID + SourceRevision + endpoint) the target is
-// accepted under is pinned in the same transaction, so the classification basis and the
-// source basis of a version are never recorded apart. A zero srcBasis pins nothing.
-func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folderBasis, srcBasis SnapshotSourceBasis) (int64, error) {
+func beginPendingWithBasis(ctx context.Context, db *sql.DB, targetBasis []folderBasis) (int64, error) {
+	return beginPendingWithBases(ctx, db, targetBasis, SnapshotSourceBasis{})
+}
+
+// beginPendingWithBases is beginPendingWithBasis that ALSO pins the exact source basis
+// (TDI-I2B: SourceID + SourceRevision + endpoint) the target is accepted under, in the same
+// transaction, so the classification basis and the source basis of a version are never
+// recorded apart. A zero srcBasis pins nothing.
+func beginPendingWithBases(ctx context.Context, db *sql.DB, targetBasis []folderBasis, srcBasis SnapshotSourceBasis) (int64, error) {
 	accepted, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
 	if err != nil {
 		return 0, err
@@ -800,7 +804,7 @@ func reconcileIfPending(ctx context.Context, db *sql.DB, rootPath string, inScop
 // projection; it MUST be preflighted (freezeDiskBasis) before this call so a missing or
 // invalid rule HOLDs before any DB row advances (TDI-I4F §5).
 func acceptWork(ctx context.Context, db *sql.DB, rootPath string, diffs []FolderDiff, changes []FileChange, targetBasis []folderBasis, srcBasis SnapshotSourceBasis, inScope map[string]struct{}) (complete bool, err error) {
-	if _, err = beginPendingWithBasis(ctx, db, targetBasis, srcBasis); err != nil {
+	if _, err = beginPendingWithBases(ctx, db, targetBasis, srcBasis); err != nil {
 		return false, err
 	}
 	if len(diffs) > 0 || len(changes) > 0 {

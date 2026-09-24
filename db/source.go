@@ -29,10 +29,8 @@ package db
 // meaning. So the witness gates whether an endpoint change may be adopted under the
 // existing SourceID; it is never stored as the SourceID itself.
 //
-// Scope note: I2A only ESTABLISHES and maintains the envelope. Nothing here changes an
-// acceptance decision — SyncFolders records the envelope and then proceeds exactly as
-// before. Wiring acceptance to CONSUME the envelope is I2B and is deliberately not done
-// here.
+// Scope note: this file only ESTABLISHES and maintains the envelope. Acceptance and
+// recovery CONSUME it through the per-version source basis in source_basis.go (I2B).
 
 import (
 	"context"
