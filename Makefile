@@ -21,9 +21,13 @@ BUF := $(LOCALBIN)/buf
 # Track A focused lint scope (service/transport/runtime is intentionally excluded in Phase 0).
 PKGS_LINT := ./config ./db ./rules ./block ./cmd/...
 PKGS_SECURITY := ./db ./rules ./block
-PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/...
+PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/... ./service
+# Packages that must stay in PKGS_TEST_CORE (tori#40: ./service was silently
+# omitted from the required test/coverage scope). test-scope-check fails if any
+# of them is dropped.
+PKGS_TEST_REQUIRED := ./service
 
-.PHONY: doctor test test-core coverage test-guardrail test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
+.PHONY: doctor test test-core coverage test-guardrail test-scope-checktest-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
 
 doctor:
 	@if [[ -n "$${GOROOT:-}" && ! -d "$$GOROOT" ]]; then \
@@ -37,10 +41,18 @@ doctor:
 test:
 	go test -race -shuffle=on -count=1 ./...
 
-test-core: test-guardrail
+test-core: test-scope-check test-guardrail
 	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE)
 
-coverage:
+test-scope-check:
+	@missing="$(filter-out $(PKGS_TEST_CORE),$(PKGS_TEST_REQUIRED))"; \
+	if [[ -n "$$missing" ]]; then \
+		echo "PKGS_TEST_CORE is missing required package(s): $$missing"; \
+		exit 1; \
+	fi
+	@echo "[test-scope] PKGS_TEST_CORE covers required: $(PKGS_TEST_REQUIRED)"
+
+coverage: test-scope-check
 	@mkdir -p "$(REPORT_DIR)"
 	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE) -coverprofile="$(REPORT_DIR)/cover.out" -covermode=atomic
 	go tool cover -func="$(REPORT_DIR)/cover.out" | tee "$(REPORT_DIR)/coverage.txt"
