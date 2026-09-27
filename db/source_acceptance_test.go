@@ -387,8 +387,10 @@ func TestI2B_PinIsImmutable(t *testing.T) {
 }
 
 // I2B-T08b: a pending target pinned under R1 whose R1 reconcile is incomplete (an accepted
-// target folder vanished) must not be re-minted under R2. The acceptance HOLDs and the
-// pending target keeps its R1 pin, R1 classification basis and inventory; restoring R1
+// target folder vanished) must not be re-minted under R2. The run reports incomplete-pending
+// (the R1 reconcile already rewrote the projection without the vanished folder, so it is not
+// a no-mutation degraded-hold) and the pending target keeps its R1 pin, R1 classification
+// basis and inventory; restoring R1
 // lets the pending acceptance converge under R1, after which R2 is a NEW version.
 func TestI2B_PendingTargetIsNotReMintedUnderAnotherRevision(t *testing.T) {
 	ctx := context.Background()
@@ -398,6 +400,7 @@ func TestI2B_PendingTargetIsNotReMintedUnderAnotherRevision(t *testing.T) {
 	acceptBaseline(t, conn, root)
 	r1 := acceptedPinForTest(t, conn)
 	acceptedBefore := r1.Version
+	runAOnlyBlocks := loadBlocks(t, root)
 
 	// Pending target T pinned to R1: the runB acceptance crashes before the clean mark.
 	dirB := writeRuleFolder(t, root, "runB", pairFiles("B")...)
@@ -419,6 +422,10 @@ func TestI2B_PendingTargetIsNotReMintedUnderAnotherRevision(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("pending target v%d runB basis: ok=%v err=%v", targetVer, ok, err)
 	}
+	pendingBlocks := loadBlocks(t, root)
+	if sameBlocks(pendingBlocks, runAOnlyBlocks) {
+		t.Fatalf("pending target v%d projection does not include runB", targetVer)
+	}
 
 	// The accepted target folder vanishes, so the R1 reconcile cannot complete, and the
 	// config moves to R2 (a pure meaning change).
@@ -427,26 +434,33 @@ func TestI2B_PendingTargetIsNotReMintedUnderAnotherRevision(t *testing.T) {
 	}
 	r2Ex := append(append([]string{}, acceptanceExclusions...), "*.bam")
 	res := syncForTest(t, conn, root, nil, r2Ex)
-	if res.Outcome != OutcomeDegradedHold || !strings.Contains(res.Reason, "CONFLICT") {
-		t.Fatalf("R2 over a pending R1 target = %s (%s), want degraded-hold on a source basis CONFLICT", res.Outcome, res.Reason)
+	// The incomplete R1 reconcile already rewrote the projection without runB, so the run
+	// did mutate: it must report incomplete-pending, never degraded-hold (no mutation, prior
+	// projection retained).
+	if res.Outcome != OutcomeIncompletePending || !strings.Contains(res.Reason, "CONFLICT") {
+		t.Fatalf("R2 over a pending R1 target = %s (%s), want incomplete-pending on a source basis CONFLICT", res.Outcome, res.Reason)
+	}
+	if got := loadBlocks(t, root); !sameBlocks(got, runAOnlyBlocks) {
+		t.Fatalf("projection after the incomplete R1 reconcile = %d blocks, want the runA-only rebuild (%d blocks; pending T had %d)",
+			len(got), len(runAOnlyBlocks), len(pendingBlocks))
 	}
 	if st := acceptanceStateForTest(t, conn); st != acceptancePending {
-		t.Fatalf("HOLD left state %s, want the R1 target still pending", st)
+		t.Fatalf("conflict left state %s, want the R1 target still pending", st)
 	}
 	if v := acceptedVersionForTest(t, conn); v != acceptedBefore {
-		t.Fatalf("HOLD advanced accepted_version v%d → v%d", acceptedBefore, v)
+		t.Fatalf("conflict advanced accepted_version v%d → v%d", acceptedBefore, v)
 	}
 	if tv, _ := metaGetInt(ctx, conn, metaKeyTargetVersion); tv != targetVer {
-		t.Fatalf("HOLD moved target_version v%d → v%d", targetVer, tv)
+		t.Fatalf("conflict moved target_version v%d → v%d", targetVer, tv)
 	}
 	if got, _ := pinAtForTest(t, conn, targetVer); got != pinned {
 		t.Fatalf("pending target pin changed: %+v → %+v", pinned, got)
 	}
 	if got, ok, err := getSemantics(ctx, conn, targetVer, dirB); err != nil || !ok || got != semB {
-		t.Fatalf("pending target classification basis changed under the HOLD: %+v → %+v (ok=%v err=%v)", semB, got, ok, err)
+		t.Fatalf("pending target classification basis changed under the conflict: %+v → %+v (ok=%v err=%v)", semB, got, ok, err)
 	}
 	if !folderExistsInDB(t, conn, "runB") {
-		t.Fatalf("HOLD pruned runB from the pending R1 inventory")
+		t.Fatalf("conflict pruned runB from the pending R1 inventory")
 	}
 
 	// Back under R1, the pending acceptance converges as the R1 version T (runB pruned) …

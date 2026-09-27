@@ -416,12 +416,15 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 		// TDI-I2B: a pending target already pinned under another revision (its reconcile under
 		// that revision was incomplete) must not be re-minted under the current one. The
 		// pending transition rolled back as a whole, so the target keeps its pin, its
-		// classification basis and its inventory. HOLD; the pending acceptance converges once
-		// its pinned revision's reconcile can complete.
-		res.Outcome = OutcomeDegradedHold
-		res.Scope = ScopeConfirmed
-		res.Coverage = CoverageComplete
-		res.Reason = fmt.Sprintf("source basis CONFLICT: %v; refusing to re-mint the pending target under the current revision", err)
+		// classification basis and its inventory; the pending acceptance converges once its
+		// pinned revision's reconcile can complete.
+		//
+		// This is NOT OutcomeDegradedHold: the target is only still pending because this run's
+		// reconcileIfPending could not complete, and that reconcile already rewrote
+		// datablock.pb without the vanished folder. The prior projection was not retained, so
+		// report the incomplete pending snapshot as it is.
+		res.Outcome = OutcomeIncompletePending
+		res.Reason = fmt.Sprintf("source basis CONFLICT: %v; pending reconciliation incomplete (an accepted folder is temporarily absent), refusing to re-mint the pending target under the current revision; retry to converge", err)
 		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
 		return res, nil
 	}
