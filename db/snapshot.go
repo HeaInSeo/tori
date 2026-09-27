@@ -412,6 +412,19 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 8) Accept: pending + frozen target basis (one tx) → atomic DB mutation →
 	//    projection rebuild from the pinned target basis → clean (promotes target basis).
 	complete, err := acceptWork(ctx, db, rootPath, fDiff, fChange, targetBasis, cur, inScope)
+	if errors.Is(err, errSourceBasisConflict) {
+		// TDI-I2B: a pending target already pinned under another revision (its reconcile under
+		// that revision was incomplete) must not be re-minted under the current one. The
+		// pending transition rolled back as a whole, so the target keeps its pin, its
+		// classification basis and its inventory. HOLD; the pending acceptance converges once
+		// its pinned revision's reconcile can complete.
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reason = fmt.Sprintf("source basis CONFLICT: %v; refusing to re-mint the pending target under the current revision", err)
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
+	}
 	if err != nil {
 		globallog.Log.Errorf("acceptWork 실패: %v", err)
 		return SyncResult{}, err

@@ -54,6 +54,12 @@ const (
 // established against the current envelope. Callers HOLD rather than guess.
 var errSourceBasisUnresolved = errors.New("pinned source basis does not resolve in the current source envelope")
 
+// errSourceBasisConflict reports an attempt to pin a version that already names a different
+// source basis (another SourceID or SourceRevision). The pin is immutable, so the caller's
+// transaction fails as a whole and nothing recorded with it — the classification basis
+// included — may land under that version. Callers HOLD.
+var errSourceBasisConflict = errors.New("version already pins a different source basis")
+
 // SnapshotSourceBasis is the exact source basis one snapshot version was accepted under.
 type SnapshotSourceBasis struct {
 	Version    int64
@@ -94,16 +100,29 @@ func ensureSourceBasisTable(ctx context.Context, e sqlDBTX) error {
 	return nil
 }
 
-// pinSourceBasisTx records the source basis for version. An existing pin for the same
-// version is kept as it is (DO NOTHING): once a version names its source basis, nothing
-// may rewrite it. A retried pending transition re-pins the same target version with the
-// same basis, so this is idempotent for the legitimate caller.
+// pinSourceBasisTx records the source basis for version. Once a version names its source
+// basis, nothing may rewrite it. A retried pending transition re-pins the same target
+// version with the same basis, so this is idempotent for the legitimate caller (an endpoint
+// difference alone continues the revision and keeps the existing row). A re-pin naming a
+// different SourceID or SourceRevision is a conflict, not a no-op: silently keeping the old
+// pin would let the caller's transaction commit a classification basis and inventory
+// observed under one revision next to a source pin of another (errSourceBasisConflict).
 func pinSourceBasisTx(ctx context.Context, e sqlDBTX, version int64, b SnapshotSourceBasis) error {
 	if err := ensureSourceBasisTable(ctx, e); err != nil {
 		return err
 	}
 	if b.SourceID == "" || b.RevisionID == "" || b.EndpointID == "" {
 		return fmt.Errorf("refusing to pin an incomplete source basis at v%d: %+v", version, b)
+	}
+	if existing, ok, err := getSourceBasis(ctx, e, version); err != nil {
+		return err
+	} else if ok {
+		if !existing.sameSource(b) {
+			return fmt.Errorf("%w: v%d pins %s@%s, refusing %s@%s",
+				errSourceBasisConflict, version, existing.SourceID, shortRev(existing.RevisionID),
+				b.SourceID, shortRev(b.RevisionID))
+		}
+		return nil
 	}
 	if _, err := e.ExecContext(ctx,
 		`INSERT INTO snapshot_source_basis (version, source_id, revision_id, endpoint_id, origin)

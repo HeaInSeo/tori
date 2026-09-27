@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -355,7 +356,9 @@ func TestI2B_UnresolvedPinHolds(t *testing.T) {
 	}
 }
 
-// I2B-T08: a pinned version is never rewritten, even by a direct re-pin.
+// I2B-T08: a pinned version is never rewritten. Re-pinning the same basis is an idempotent
+// no-op; re-pinning a different revision or source is a conflict error, never a silent
+// success that would let the caller commit alongside a pin it did not observe under.
 func TestI2B_PinIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -364,13 +367,110 @@ func TestI2B_PinIsImmutable(t *testing.T) {
 	acceptBaseline(t, conn, root)
 	pin := acceptedPinForTest(t, conn)
 
-	other := pin
-	other.RevisionID = strings.Repeat("0", 64)
-	if err := pinSourceBasisTx(ctx, conn, pin.Version, other); err != nil {
-		t.Fatalf("re-pin: %v", err)
+	if err := pinSourceBasisTx(ctx, conn, pin.Version, pin); err != nil {
+		t.Fatalf("same-basis re-pin: %v, want idempotent nil", err)
 	}
-	if got := acceptedPinForTest(t, conn); got != pin {
-		t.Fatalf("pin rewritten in place: %+v → %+v", pin, got)
+
+	otherRev := pin
+	otherRev.RevisionID = strings.Repeat("0", 64)
+	otherSrc := pin
+	otherSrc.SourceID = "src-someoneelse"
+	for name, other := range map[string]SnapshotSourceBasis{"revision": otherRev, "source": otherSrc} {
+		err := pinSourceBasisTx(ctx, conn, pin.Version, other)
+		if !errors.Is(err, errSourceBasisConflict) {
+			t.Fatalf("conflicting %s re-pin: err = %v, want errSourceBasisConflict", name, err)
+		}
+		if got := acceptedPinForTest(t, conn); got != pin {
+			t.Fatalf("pin rewritten in place by conflicting %s re-pin: %+v → %+v", name, pin, got)
+		}
+	}
+}
+
+// I2B-T08b: a pending target pinned under R1 whose R1 reconcile is incomplete (an accepted
+// target folder vanished) must not be re-minted under R2. The acceptance HOLDs and the
+// pending target keeps its R1 pin, R1 classification basis and inventory; restoring R1
+// lets the pending acceptance converge under R1, after which R2 is a NEW version.
+func TestI2B_PendingTargetIsNotReMintedUnderAnotherRevision(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	conn := newAcceptanceDB(t)
+	writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	acceptBaseline(t, conn, root)
+	r1 := acceptedPinForTest(t, conn)
+	acceptedBefore := r1.Version
+
+	// Pending target T pinned to R1: the runB acceptance crashes before the clean mark.
+	dirB := writeRuleFolder(t, root, "runB", pairFiles("B")...)
+	crashAfterPublishForTest = func() bool { return true }
+	t.Cleanup(func() { crashAfterPublishForTest = nil })
+	if res := syncForTest(t, conn, root, nil, acceptanceExclusions); res.Outcome != OutcomeIncompletePending {
+		t.Fatalf("crash window = %s (%s), want incomplete-pending", res.Outcome, res.Reason)
+	}
+	crashAfterPublishForTest = nil
+	targetVer, err := metaGetInt(ctx, conn, metaKeyTargetVersion)
+	if err != nil {
+		t.Fatalf("target_version: %v", err)
+	}
+	pinned, ok := pinAtForTest(t, conn, targetVer)
+	if !ok || !pinned.sameSource(r1) {
+		t.Fatalf("pending target v%d pin = %+v ok=%v, want R1", targetVer, pinned, ok)
+	}
+	semB, ok, err := getSemantics(ctx, conn, targetVer, dirB)
+	if err != nil || !ok {
+		t.Fatalf("pending target v%d runB basis: ok=%v err=%v", targetVer, ok, err)
+	}
+
+	// The accepted target folder vanishes, so the R1 reconcile cannot complete, and the
+	// config moves to R2 (a pure meaning change).
+	if err := os.RemoveAll(dirB); err != nil {
+		t.Fatalf("vanish runB: %v", err)
+	}
+	r2Ex := append(append([]string{}, acceptanceExclusions...), "*.bam")
+	res := syncForTest(t, conn, root, nil, r2Ex)
+	if res.Outcome != OutcomeDegradedHold || !strings.Contains(res.Reason, "CONFLICT") {
+		t.Fatalf("R2 over a pending R1 target = %s (%s), want degraded-hold on a source basis CONFLICT", res.Outcome, res.Reason)
+	}
+	if st := acceptanceStateForTest(t, conn); st != acceptancePending {
+		t.Fatalf("HOLD left state %s, want the R1 target still pending", st)
+	}
+	if v := acceptedVersionForTest(t, conn); v != acceptedBefore {
+		t.Fatalf("HOLD advanced accepted_version v%d → v%d", acceptedBefore, v)
+	}
+	if tv, _ := metaGetInt(ctx, conn, metaKeyTargetVersion); tv != targetVer {
+		t.Fatalf("HOLD moved target_version v%d → v%d", targetVer, tv)
+	}
+	if got, _ := pinAtForTest(t, conn, targetVer); got != pinned {
+		t.Fatalf("pending target pin changed: %+v → %+v", pinned, got)
+	}
+	if got, ok, err := getSemantics(ctx, conn, targetVer, dirB); err != nil || !ok || got != semB {
+		t.Fatalf("pending target classification basis changed under the HOLD: %+v → %+v (ok=%v err=%v)", semB, got, ok, err)
+	}
+	if !folderExistsInDB(t, conn, "runB") {
+		t.Fatalf("HOLD pruned runB from the pending R1 inventory")
+	}
+
+	// Back under R1, the pending acceptance converges as the R1 version T (runB pruned) …
+	res = syncForTest(t, conn, root, nil, acceptanceExclusions)
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("R1 retry = %s (%s), want accepted-update", res.Outcome, res.Reason)
+	}
+	if v := acceptedVersionForTest(t, conn); v != targetVer {
+		t.Fatalf("R1 retry accepted v%d, want the pending target v%d", v, targetVer)
+	}
+	if got := acceptedPinForTest(t, conn); got != pinned {
+		t.Fatalf("converged v%d pin = %+v, want the original R1 pin %+v", targetVer, got, pinned)
+	}
+	// … and only then is R2 accepted, as a new version with its own pin.
+	res = syncForTest(t, conn, root, nil, r2Ex)
+	if res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("R2 after convergence = %s (%s), want accepted-update", res.Outcome, res.Reason)
+	}
+	r2 := acceptedPinForTest(t, conn)
+	if r2.Version != targetVer+1 || r2.RevisionID == r1.RevisionID {
+		t.Fatalf("R2 pin = %+v, want a new revision at v%d", r2, targetVer+1)
+	}
+	if got, _ := pinAtForTest(t, conn, targetVer); got != pinned {
+		t.Fatalf("R2 acceptance rewrote the R1 pin at v%d: %+v → %+v", targetVer, pinned, got)
 	}
 }
 
