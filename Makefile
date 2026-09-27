@@ -27,7 +27,7 @@ PKGS_TEST_CORE := ./config ./db ./rules ./block ./cmd/... ./service
 # of them is dropped.
 PKGS_TEST_REQUIRED := ./service
 
-.PHONY: doctor test test-core coverage test-guardrail test-scope-checktest-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
+.PHONY: doctor test test-core coverage test-guardrail test-scope-check test-skip-report test-shared-fs-fixtures test-nas-fixtures fmt vet lint lint-depguard lint-security lint-security-check proto-lint vuln vuln-check vuln-all golangci-lint govulncheck
 
 doctor:
 	@if [[ -n "$${GOROOT:-}" && ! -d "$$GOROOT" ]]; then \
@@ -56,6 +56,19 @@ coverage: test-scope-check
 	@mkdir -p "$(REPORT_DIR)"
 	go test -race -shuffle=on -count=1 $(PKGS_TEST_CORE) -coverprofile="$(REPORT_DIR)/cover.out" -covermode=atomic
 	go tool cover -func="$(REPORT_DIR)/cover.out" | tee "$(REPORT_DIR)/coverage.txt"
+
+# Executed/skipped test counts plus every skipped test name (tori#23), so a skip
+# can't pass as coverage unnoticed. Counts include subtests.
+test-skip-report: test-scope-check
+	@mkdir -p "$(REPORT_DIR)"
+	go test -count=1 -json $(PKGS_TEST_CORE) > "$(REPORT_DIR)/test-events.json"
+	@awk '/"Action":"(pass|fail|skip)"/ && /"Test":/ { \
+		match($$0, /"Action":"[a-z]+"/); a = substr($$0, RSTART + 10, RLENGTH - 11); n[a]++; \
+		if (a == "skip") { match($$0, /"Package":"[^"]*","Test":"[^"]*"/); s[++k] = substr($$0, RSTART, RLENGTH) } \
+	} END { \
+		printf "tests pass=%d fail=%d skip=%d\n", n["pass"], n["fail"], n["skip"]; \
+		for (i = 1; i <= k; i++) print "SKIP " s[i] \
+	}' "$(REPORT_DIR)/test-events.json" | tee "$(REPORT_DIR)/test-skip-summary.txt"
 
 test-shared-fs-fixtures:
 	TORI_SHARED_FIXTURE_ROOT="$(TORI_SHARED_FIXTURE_ROOT)" go test -race ./block -run TestSharedFSFixtureSmoke

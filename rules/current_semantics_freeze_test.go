@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -187,45 +188,69 @@ func TestCurrentSemanticsFreeze_FixtureC_TokenizationConsecutiveDelimiters(t *te
 	}
 }
 
-// This test records known as-is overwrite behavior for duplicate collisions.
-// It does not assert the final intended duplicate handling policy.
+// Fixture D reuses the A-1 duplicate-collision input, but asserts the current
+// duplicate semantics instead of the historical overwrite anchor stored in the
+// fixture's "expected" block (last-seen R1 silently wins). That overwrite
+// expectation is retired and must never come back:
+//   - canonical GroupFilesIsolated (docs/duplicate_policy_contract_v0.2.md)
+//     publishes no healthy winner for the conflicted subject and keeps it
+//     visible as a duplicate_role_in_row conflict;
+//   - legacy GroupFiles loudly refuses the batch with DuplicateCollisionError.
 //
-// Tracking: HeaInSeo/tori#23. Revisit when A-2 duplicate error policy lands -
-// either re-enable this test against the new intended behavior, or retire it
-// explicitly (matching Fixture E's precedent below) rather than leaving it
-// skipped indefinitely.
-func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionCurrentBehavior(t *testing.T) {
-	t.Skip("historical A-1 anchor: overwrite behavior was recorded before A-2 duplicate error policy; tracked in HeaInSeo/tori#23")
-
+// Tracking: HeaInSeo/tori#23.
+func TestCurrentSemanticsFreeze_FixtureD_DuplicateCollisionFailClosed(t *testing.T) {
 	fx := loadFreezeFixture(t, "fixture_d_duplicate_collision_current_behavior.json")
 
+	wantCandidates := []string{
+		"sample5_S5_L001_R1_001.fastq.gz",
+		"sample5__S5_L001_R1_001.fastq.gz",
+	}
+	sort.Strings(wantCandidates)
+	wantSources := append([]string(nil), fx.Files...)
+	sort.Strings(wantSources)
+
+	result := GroupFilesIsolated(fx.Files, fx.RuleSet)
+	if len(result.Healthy) != 0 {
+		t.Fatalf("conflicted subject must not publish a healthy winner (historical A-1 overwrite), got %v", result.Healthy)
+	}
+	if len(result.Conflicts) != 1 {
+		t.Fatalf("expected 1 subject conflict, got %d: %+v", len(result.Conflicts), result.Conflicts)
+	}
+	conflict := result.Conflicts[0]
+	if strings.Join(conflict.SourceFileNames, "\n") != strings.Join(wantSources, "\n") {
+		t.Fatalf("conflict must keep every subject source file\nwant=%v\ngot=%v", wantSources, conflict.SourceFileNames)
+	}
+	if len(conflict.Roles) != 1 {
+		t.Fatalf("expected 1 role collision, got %+v", conflict.Roles)
+	}
+	role := conflict.Roles[0]
+	if role.ReasonCode != "duplicate_role_in_row" || role.Role != "R1" {
+		t.Fatalf("unexpected role evidence: %+v", role)
+	}
+	if strings.Join(role.Candidates, "\n") != strings.Join(wantCandidates, "\n") {
+		t.Fatalf("candidates mismatch\nwant=%v\ngot=%v", wantCandidates, role.Candidates)
+	}
+
 	grouped, err := GroupFiles(fx.Files, fx.RuleSet)
-	if err != nil {
-		t.Fatalf("GroupFiles error: %v", err)
+	if grouped != nil {
+		t.Fatalf("legacy GroupFiles must not return a grouping on collision, got %v", grouped)
 	}
-	valid, invalid := FilterGroups(grouped, len(fx.RuleSet.Header))
-
-	assertContiguousIndices(t, valid)
-
-	gotValid := signaturesFromIndexedRows(valid)
-	wantValid := signaturesFromRows(fx.Expected.Valid)
-	if strings.Join(gotValid, "\n") != strings.Join(wantValid, "\n") {
-		t.Fatalf("valid rows mismatch\nwant=%v\ngot=%v", wantValid, gotValid)
+	var dupErr *DuplicateCollisionError
+	if !errors.As(err, &dupErr) {
+		t.Fatalf("legacy GroupFiles: expected *DuplicateCollisionError, got %T: %v", err, err)
 	}
-
-	gotInvalid := signaturesFromRows(invalid)
-	wantInvalid := signaturesFromRows(fx.Expected.Invalid)
-	if strings.Join(gotInvalid, "\n") != strings.Join(wantInvalid, "\n") {
-		t.Fatalf("invalid rows mismatch\nwant=%v\ngot=%v", wantInvalid, gotInvalid)
+	if len(dupErr.Entries) != 1 || dupErr.Entries[0].RoleKey != "R1" ||
+		strings.Join(dupErr.Entries[0].Candidates, "\n") != strings.Join(wantCandidates, "\n") {
+		t.Fatalf("unexpected legacy duplicate entries: %+v", dupErr.Entries)
 	}
 }
 
 // This test records the historical serialization/output behavior only.
 // It is retired from the active baseline after the first canonical column ordering patch.
 //
-// Tracking: HeaInSeo/tori#23. Deliberately/permanently retired (unlike
-// Fixture D above, this isn't pending future work) - kept for historical
-// reference only.
+// Tracking: HeaInSeo/tori#23. Classification: HISTORICAL RETIREMENT, not active
+// coverage - this skip is expected and must not be counted as a passed gate.
+// Kept for historical reference only.
 func TestCurrentSemanticsFreeze_FixtureE_ExportColumnOrderCurrentSerializationBehavior(t *testing.T) {
 	t.Skip("historical A-1 anchor retired from active baseline after canonical header-ordered export patch; tracked in HeaInSeo/tori#23")
 

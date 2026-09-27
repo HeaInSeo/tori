@@ -118,6 +118,9 @@ jobs:
       - name: Generate coverage report
         run: make coverage
 
+      - name: Test run/skip summary
+        run: make test-skip-report
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         if: always()

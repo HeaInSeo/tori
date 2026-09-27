@@ -320,7 +320,7 @@ func TestStoreFilesFolderInfo_RealDirectory(t *testing.T) {
 	testFolderPath := TestFolderPath
 	exclusions := Exclusions
 
-	// u.CheckPath 의존성: 실패하면 테스트 건너뛰기
+	// 환경 전제(environmental prerequisite): 호스트의 TestFolderPath가 없으면 bounded skip (tori#23).
 	checkedPath, err := u.CheckPath(testFolderPath)
 	if err != nil {
 		t.Skipf("skipping test because u.CheckPath failed: %v", err)
@@ -398,19 +398,19 @@ func TestStoreFilesFolderInfo_Integration_RealDirectory(t *testing.T) {
 	}()
 
 	// 실제 디렉토리 경로와 Exclusions 사용
-	// u.CheckPath: 만약 실패하면 테스트 건너뛰기
+	// tmpDir은 테스트가 직접 만든 디렉토리이므로 setup 실패는 skip이 아니라 회귀다 (tori#23).
 	checkedPath, err := u.CheckPath(tmpDir)
 	if err != nil {
-		t.Skipf("skipping test because u.CheckPath failed: %v", err)
+		t.Fatalf("u.CheckPath failed: %v", err)
 	}
 
 	// 실제 GetCurrentFolderFileInfo 함수 호출하여 예상 Folder 와 File 값을 얻음
 	expectedFolder, expectedFiles, err := GetCurrentFolderFileInfo(checkedPath, Exclusions)
 	if err != nil {
-		t.Skipf("skipping test because GetCurrentFolderFileInfo failed: %v", err)
+		t.Fatalf("GetCurrentFolderFileInfo failed: %v", err)
 	}
 	if expectedFolder.Path == "" || len(expectedFiles) == 0 {
-		t.Skipf("skipping test because GetCurrentFolderFileInfo returned insufficient data")
+		t.Fatalf("GetCurrentFolderFileInfo returned insufficient data")
 	}
 
 	// StoreFilesFolderInfo 함수 호출: 실제 디렉토리의 정보를 DB에 저장
@@ -530,19 +530,19 @@ func TestStoreFilesFolderInfo_LargeStructureIntegration(t *testing.T) {
 		}
 		subDirPath := filepath.Join(tmpDir, entry.Name())
 
-		// u.CheckPath: 실패 시 해당 디렉토리는 건너뛰기
+		// subDirPath는 테스트가 직접 만든 디렉토리이므로 setup 실패는 skip이 아니라 회귀다 (tori#23).
 		checkedPath, err := u.CheckPath(subDirPath)
 		if err != nil {
-			t.Skipf("skipping %s because u.CheckPath failed: %v", subDirPath, err)
+			t.Fatalf("%s: u.CheckPath failed: %v", subDirPath, err)
 		}
 
 		// GetCurrentFolderFileInfo를 호출하여 예상 Folder와 File 정보를 얻는다.
 		expectedFolder, expectedFiles, err := GetCurrentFolderFileInfo(checkedPath, Exclusions)
 		if err != nil {
-			t.Skipf("skipping %s because GetCurrentFolderFileInfo failed: %v", subDirPath, err)
+			t.Fatalf("%s: GetCurrentFolderFileInfo failed: %v", subDirPath, err)
 		}
 		if expectedFolder.Path == "" || len(expectedFiles) == 0 {
-			t.Skipf("skipping %s because GetCurrentFolderFileInfo returned insufficient data", subDirPath)
+			t.Fatalf("%s: GetCurrentFolderFileInfo returned insufficient data", subDirPath)
 		}
 
 		// StoreFilesFolderInfo 함수 호출: 해당 하위 디렉토리 정보를 DB에 저장
@@ -661,19 +661,19 @@ func TestStoreFilesFolderInfo_TooLargeStructureIntegration(t *testing.T) {
 		}
 		subDirPath := filepath.Join(tmpDir, entry.Name())
 
-		// u.CheckPath: 실패 시 해당 디렉토리는 건너뛰기
+		// subDirPath는 테스트가 직접 만든 디렉토리이므로 setup 실패는 skip이 아니라 회귀다 (tori#23).
 		checkedPath, err := u.CheckPath(subDirPath)
 		if err != nil {
-			t.Skipf("skipping %s because u.CheckPath failed: %v", subDirPath, err)
+			t.Fatalf("%s: u.CheckPath failed: %v", subDirPath, err)
 		}
 
 		// GetCurrentFolderFileInfo를 호출하여 예상 Folder와 File 정보를 얻는다.
 		expectedFolder, expectedFiles, err := GetCurrentFolderFileInfo(checkedPath, Exclusions)
 		if err != nil {
-			t.Skipf("skipping %s because GetCurrentFolderFileInfo failed: %v", subDirPath, err)
+			t.Fatalf("%s: GetCurrentFolderFileInfo failed: %v", subDirPath, err)
 		}
 		if expectedFolder.Path == "" || len(expectedFiles) == 0 {
-			t.Skipf("skipping %s because GetCurrentFolderFileInfo returned insufficient data", subDirPath)
+			t.Fatalf("%s: GetCurrentFolderFileInfo returned insufficient data", subDirPath)
 		}
 
 		// StoreFilesFolderInfo 함수 호출: 해당 하위 디렉토리 정보를 DB에 저장
