@@ -15,6 +15,9 @@ type File struct {
 	Size        int64  `db:"size"`
 	CreatedTime string `db:"created_time"` // sting 으로 해도 충분
 	Path        string `db:"-"`            // DB 매핑에서 완전히 제외
+	// Stat is the local POSIX stat tuple observed on disk (TDI-I5P-1). It is recorded in the
+	// file_stat_evidence side table, never in the files table, and is metadata only.
+	Stat StatTuple `db:"-"`
 }
 
 type Folder struct {
@@ -53,6 +56,9 @@ type FileChange struct {
 	DiskSize    int64  // 디스크상의 파일 크기
 	DBSize      int64  // DB에 저장된 파일 크기 (추가된 경우 0)
 	Path        string // 파일이 속한 폴더의 경로
+
+	// Stat 은 디스크에서 관측한 stat tuple ("added"/"modified") 이며 evidence side table 에만 기록됨.
+	Stat StatTuple
 }
 
 // UpsertFolder FolderDiff 정보를 기반으로 DB의 폴더 정보를 업데이트하거나, 없으면 삽입 또는 삭제.

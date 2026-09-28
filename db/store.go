@@ -108,6 +108,25 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 		}
 	}
 
+	// TDI-I5P-1: stat evidence side table 을 같은 tx 에서 행 변경과 일치시킨다.
+	if len(diffs) > 0 || len(changes) > 0 {
+		if eErr := ensureStatEvidenceTable(ctx, tx); eErr != nil {
+			return eErr
+		}
+	}
+	for i := range diffs {
+		if diffs[i].ChangeType == "removed" {
+			if eErr := deleteFolderStatEvidence(ctx, tx, diffs[i].FolderID); eErr != nil {
+				return eErr
+			}
+		}
+	}
+	for i := range changes {
+		if eErr := recordChangeEvidenceTx(ctx, tx, changes[i]); eErr != nil {
+			return eErr
+		}
+	}
+
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -117,26 +136,36 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 
 // DiffFolders 폴더 파일 비교
 func DiffFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusions []string) ([][]string, []FolderDiff, []FileChange, error) {
+	folderFiles, folderDiffs, fileChanges, _, err := diffFoldersWithEvidence(db, rootPath, foldersExclusions, filesExclusions)
+	return folderFiles, folderDiffs, fileChanges, err
+}
+
+// diffFoldersWithEvidence is DiffFolders that also returns every in-scope file's stat-evidence
+// observation (TDI-I5P-1), so SyncFolders can HOLD on UNKNOWN/SUSPECT/HINT_ONLY before
+// accepting the diff.
+func diffFoldersWithEvidence(db *sql.DB, rootPath string, foldersExclusions, filesExclusions []string) ([][]string, []FolderDiff, []FileChange, []statObservation, error) {
 	// 1. 폴더 비교: 디스크 폴더들과 db의 폴더 목록을 비교
 	_, folders, folderDiffs, err := CompareFolders(db, rootPath, foldersExclusions, filesExclusions)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	var (
 		folderFiles    [][]string
 		allFileChanges []FileChange
+		allObs         []statObservation
 	)
 
 	// 2. 각 폴더에 대해 파일 비교
 	for _, folder := range folders {
-		filesMatch, files, fileChanges, err := CompareFiles(db, folder.Path, filesExclusions)
+		filesMatch, files, fileChanges, obs, err := compareFilesWithEvidence(db, folder.Path, filesExclusions)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if !filesMatch {
 			allFileChanges = append(allFileChanges, fileChanges...)
 		}
+		allObs = append(allObs, obs...)
 
 		fileNames := ExtractFileNames(files)
 		folderFiles = append(folderFiles, append([]string{folder.Path}, fileNames...))
@@ -144,10 +173,10 @@ func DiffFolders(db *sql.DB, rootPath string, foldersExclusions, filesExclusions
 
 	// 전체 동일 여부 판단: folderDiffs 와 allFileChanges 가 모두 비어 있으면 동일
 	if len(folderDiffs) == 0 && len(allFileChanges) == 0 {
-		return folderFiles, nil, nil, nil
+		return folderFiles, nil, nil, allObs, nil
 	}
 
-	return folderFiles, folderDiffs, allFileChanges, nil
+	return folderFiles, folderDiffs, allFileChanges, allObs, nil
 }
 
 // StoreFilesFolderInfo 폴더 경로를 받아 폴더 내 파일 정보를 DB에 삽입하는 함수, TODO 한번만 실행되고 말아야 함. 이름 수정하자.
@@ -215,13 +244,40 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 		}
 	}()
 
+	// insert_file.sql 은 같은 이름의 기존 row 를 ON CONFLICT DO NOTHING 으로 남겨 두므로,
+	// 이번 호출이 실제로 새로 넣은 row 만 모은다.
+	var inserted []File
 	for _, file := range fileDetails {
-		if _, err = stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime); err != nil {
+		res, execErr := stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime)
+		if execErr != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 				logger.Infof("rollback failed: %v", rbErr)
 			}
-			return fmt.Errorf("failed to insert file: %w", err)
+			return fmt.Errorf("failed to insert file: %w", execErr)
 		}
+		n, raErr := res.RowsAffected()
+		if raErr != nil {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				logger.Infof("rollback failed: %v", rbErr)
+			}
+			return fmt.Errorf("failed to read inserted row count for %s: %w", file.Name, raErr)
+		}
+		if n > 0 {
+			inserted = append(inserted, file)
+		}
+	}
+
+	// TDI-I5P-1: seed 시 관측한 stat tuple 을 같은 tx 에서 evidence 로 기록한다. 새로 넣은
+	// row 에 대해서만 기록한다. 이미 있던 (accepted 일 수 있는) row 의 evidence 는 re-seed 가
+	// 덮어쓰지 않는다 — 덮어쓰면 acceptance 없이 baseline 이 바뀌어 same-size rewrite 가 다음
+	// sync 에서 unchanged 로 숨는다. evidence 가 없던 기존 row 는 다음 scan 에서 HINT_ONLY 로
+	// HOLD 된다. tuple 이 UNKNOWN 인 파일은 기록하지 않으며, 다음 SyncFolders 가 fail closed 로
+	// HOLD 한다.
+	if err = recordSeedStatEvidenceTx(ctx, tx, folderID, inserted); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Infof("rollback failed: %v", rbErr)
+		}
+		return err
 	}
 
 	err = execSQLTx(ctx, tx, "update_folders_fromDB.sql", folderID)

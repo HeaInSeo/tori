@@ -307,10 +307,62 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 6) Diff the confirmed+complete source against the accepted DB. The disk
 	//    folderFiles byproduct is intentionally discarded: the projection is rebuilt
 	//    from the accepted DB (see acceptWork), never from this raw disk snapshot.
-	_, fDiff, fChange, err := DiffFolders(db, rootPath, foldersExclusions, filesExclusions)
+	_, fDiff, fChange, statObs, err := diffFoldersWithEvidence(db, rootPath, foldersExclusions, filesExclusions)
 	if err != nil {
 		globallog.Log.Errorf("DiffFolders 실패: %v", err)
 		return SyncResult{}, err
+	}
+
+	// 6a) TDI-I5P-1 stat evidence: an UNKNOWN tuple (fail closed), a SUSPECT rewrite (size,
+	//     mtime_ns and inode unchanged but ctime_ns changed), or legacy accepted rows with no
+	//     recorded tuple (first scan after upgrade: tuples recorded as HINT_ONLY only) HOLD the
+	//     whole acceptance before any accepted-row mutation or projection write, and before an
+	//     "unchanged" can be reported. The previous accepted DB is retained; a missing projection
+	//     is restored from the accepted frozen basis before holding (as with drift above).
+	if held, reason, eErr := holdOnStatEvidence(ctx, db, statObs); eErr != nil {
+		return SyncResult{}, eErr
+	} else if held {
+		// As with drift above: an incomplete prior reconcile this run left the snapshot pending
+		// with a rewritten projection, so the previous snapshot was NOT retained. Report that
+		// state rather than a degraded HOLD, which would claim no mutation occurred.
+		if st, sErr := readAcceptanceState(ctx, db); sErr != nil {
+			return SyncResult{}, sErr
+		} else if st == acceptancePending {
+			res.Outcome = OutcomeIncompletePending
+			res.Reason = fmt.Sprintf("pending reconciliation incomplete (an accepted folder is temporarily absent) while %s; retry to converge", reason)
+			globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+			return res, nil
+		}
+		// The HOLD is about the disk observation, not the accepted snapshot: a missing
+		// projection is rebuilt from the accepted DB and frozen basis only (never from the held
+		// observation), so the HOLD does not leave datablock.pb missing for as long as the
+		// evidence stays SUSPECT/UNKNOWN. Without an accepted basis (bootstrap) there is
+		// nothing to restore.
+		if _, statErr := os.Stat(filepath.Join(rootPath, "datablock.pb")); os.IsNotExist(statErr) {
+			hasAcceptedBasis, hErr := countSemanticsAtVersion(ctx, db, acceptedVer)
+			if hErr != nil {
+				return SyncResult{}, hErr
+			}
+			if hasAcceptedBasis > 0 {
+				restored, rErr := publishAcceptedProjection(ctx, db, rootPath, acceptedScope)
+				if rErr != nil {
+					return SyncResult{}, rErr
+				}
+				if !restored {
+					res.Outcome = OutcomeIncompletePending
+					res.Reason = fmt.Sprintf("%s, but the projection restore is incomplete (an accepted folder vanished); pending, retry to converge", reason)
+					globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+					return res, nil
+				}
+			}
+		}
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reconcile = reconciled
+		res.Reason = reason
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
 	}
 
 	outputDatablock := filepath.Join(rootPath, "datablock.pb")
