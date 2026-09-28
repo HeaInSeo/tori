@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -148,6 +149,7 @@ func GetCurrentFolderFileInfo(dirPath string, exclusions []string) (Folder, []Fi
 			Size:        size,
 			CreatedTime: info.ModTime().Format("2006-01-02 15:04:05"),
 			Path:        dirPath, // Path 필드에 실제 파일 경로를 채움
+			Stat:        statTupleOf(info),
 		}
 		files = append(files, fileRecord)
 	}
@@ -253,15 +255,28 @@ func normalizeTimeStr(s string) string {
 
 // CompareFiles  파일 비교.
 func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool, []File, []FileChange, error) {
+	unchanged, diskFiles, changes, _, err := compareFilesWithEvidence(db, folderPath, filesExclusions)
+	return unchanged, diskFiles, changes, err
+}
+
+// compareFilesWithEvidence is CompareFiles that also returns the per-file stat-evidence
+// classification (TDI-I5P-1, see stat_evidence.go). A file is "modified" when the legacy
+// size/1s-mtime comparison OR the recorded stat tuple (size, mtime_ns, inode) says so; a
+// SUSPECT/UNKNOWN/HINT_ONLY observation is reported in obs and never turned into a change.
+func compareFilesWithEvidence(db *sql.DB, folderPath string, filesExclusions []string) (bool, []File, []FileChange, []statObservation, error) {
 	// 디스크의 파일 정보 조회
 	_, diskFiles, err := GetCurrentFolderFileInfo(folderPath, filesExclusions)
 	if err != nil {
-		return false, nil, nil, fmt.Errorf("failed to get folder details for %s: %w", folderPath, err)
+		return false, nil, nil, nil, fmt.Errorf("failed to get folder details for %s: %w", folderPath, err)
 	}
 	// DB의 파일 정보 조회 (해당 Folder 에 해당하는)
 	dbFiles, err := GetFilesByPathFromDB(db, folderPath)
 	if err != nil {
-		return false, nil, nil, fmt.Errorf("failed to get DB files for folder %s: %w", folderPath, err)
+		return false, nil, nil, nil, fmt.Errorf("failed to get DB files for folder %s: %w", folderPath, err)
+	}
+	stored, err := getStatEvidenceByPath(context.Background(), db, folderPath)
+	if err != nil {
+		return false, nil, nil, nil, err
 	}
 
 	// 파일 이름을 키로 하는 맵 생성 (디스크와 DB 각각)
@@ -274,10 +289,18 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 		dbMap[f.Name] = f
 	}
 
-	var changes []FileChange
+	var (
+		changes []FileChange
+		obs     []statObservation
+	)
 	// 디스크에만 있는 파일 (추가된 파일)
 	for name, diskF := range diskMap {
 		if dbF, ok := dbMap[name]; !ok {
+			class := EvidenceStatTuple
+			if !diskF.Stat.Known {
+				class = EvidenceUnknown
+			}
+			obs = append(obs, statObservation{Path: folderPath, Name: name, Class: class, Disk: diskF.Stat})
 			changes = append(changes, FileChange{
 				ChangeType:  "added",
 				FileID:      0,
@@ -287,10 +310,16 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 				DiskSize:    diskF.Size,
 				DBSize:      0,
 				Path:        diskF.Path,
+				Stat:        diskF.Stat,
 			})
 		} else {
-			// size 또는 mtime 이 다른 경우 수정으로 판단 (mtime은 포맷 정규화 후 비교)
-			if diskF.Size != dbF.Size || normalizeTimeStr(diskF.CreatedTime) != normalizeTimeStr(dbF.CreatedTime) {
+			ev, hasEv := stored[name]
+			tupleModified, class := classifyExisting(diskF.Stat, ev, hasEv)
+			obs = append(obs, statObservation{FolderID: dbF.FolderID, Path: folderPath, Name: name, Class: class, Disk: diskF.Stat})
+			// size 또는 mtime 이 다른 경우 수정으로 판단 (mtime은 포맷 정규화 후 비교).
+			// 기록된 stat tuple 의 size/mtime_ns/inode 가 다르면 (예: 같은 크기·같은 초의
+			// rename-into-place) 1초 문자열이 같아도 수정으로 판단한다.
+			if tupleModified || diskF.Size != dbF.Size || normalizeTimeStr(diskF.CreatedTime) != normalizeTimeStr(dbF.CreatedTime) {
 				changes = append(changes, FileChange{
 					ChangeType:  "modified",
 					FileID:      dbF.ID,
@@ -300,6 +329,7 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 					DiskSize:    diskF.Size,
 					DBSize:      dbF.Size,
 					Path:        diskF.Path,
+					Stat:        diskF.Stat,
 				})
 			}
 		}
@@ -319,7 +349,7 @@ func CompareFiles(db *sql.DB, folderPath string, filesExclusions []string) (bool
 		}
 	}
 	unchanged := len(changes) == 0
-	return unchanged, diskFiles, changes, nil
+	return unchanged, diskFiles, changes, obs, nil
 }
 
 // GetFoldersInfo 지정한 Folder 배열에 대해, 각 Folder 의 TotalSize 와 FileCount 값을 계산하여 업데이트함.

@@ -307,10 +307,27 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	// 6) Diff the confirmed+complete source against the accepted DB. The disk
 	//    folderFiles byproduct is intentionally discarded: the projection is rebuilt
 	//    from the accepted DB (see acceptWork), never from this raw disk snapshot.
-	_, fDiff, fChange, err := DiffFolders(db, rootPath, foldersExclusions, filesExclusions)
+	_, fDiff, fChange, statObs, err := diffFoldersWithEvidence(db, rootPath, foldersExclusions, filesExclusions)
 	if err != nil {
 		globallog.Log.Errorf("DiffFolders 실패: %v", err)
 		return SyncResult{}, err
+	}
+
+	// 6a) TDI-I5P-1 stat evidence: an UNKNOWN tuple (fail closed), a SUSPECT rewrite (size,
+	//     mtime_ns and inode unchanged but ctime_ns changed), or legacy accepted rows with no
+	//     recorded tuple (first scan after upgrade: tuples recorded as HINT_ONLY only) HOLD the
+	//     whole acceptance before any accepted-row mutation or projection write, and before an
+	//     "unchanged" can be reported. The previous accepted DB and projection are retained.
+	if held, reason, eErr := holdOnStatEvidence(ctx, db, statObs); eErr != nil {
+		return SyncResult{}, eErr
+	} else if held {
+		res.Outcome = OutcomeDegradedHold
+		res.Scope = ScopeConfirmed
+		res.Coverage = CoverageComplete
+		res.Reconcile = reconciled
+		res.Reason = reason
+		globallog.Log.Warnf("SyncFolders HOLD: %s", res.Reason)
+		return res, nil
 	}
 
 	outputDatablock := filepath.Join(rootPath, "datablock.pb")

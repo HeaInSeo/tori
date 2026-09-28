@@ -57,3 +57,18 @@ CREATE TABLE IF NOT EXISTS source_endpoints (
                                      PRIMARY KEY (source_id, endpoint_id)
 );
 
+-- TDI-I5P-1 local POSIX stat evidence: a metadata observation only (content_proof is always
+-- NONE). db/stat_evidence.go creates it idempotently too, so a pre-existing DB needs no
+-- migration step and the files table schema is unchanged.
+CREATE TABLE IF NOT EXISTS file_stat_evidence (
+                                     folder_id INTEGER NOT NULL,
+                                     name TEXT NOT NULL,
+                                     size INTEGER NOT NULL,
+                                     mtime_ns INTEGER NOT NULL,
+                                     ctime_ns INTEGER NOT NULL,
+                                     inode INTEGER NOT NULL,
+                                     evidence_class TEXT NOT NULL,
+                                     content_proof TEXT NOT NULL DEFAULT 'NONE',
+                                     PRIMARY KEY (folder_id, name)
+);
+
