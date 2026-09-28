@@ -399,6 +399,39 @@ func TestI5P_T08_RemovalDropsEvidence(t *testing.T) {
 	}
 }
 
+// I5P-T09: an incomplete pending reconcile (an accepted folder vanished) takes precedence
+// over a stat-evidence HOLD: the projection was already rewritten, so the result must be
+// incomplete-pending, not a degraded HOLD claiming the prior snapshot was retained.
+func TestI5P_T09_IncompleteReconcileWithSuspectIsIncompletePending(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dirA := writeRuleFolder(t, root, "a", pairFiles("A")...)
+	dirB := writeRuleFolder(t, root, "b", pairFiles("B")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	acceptedVer := acceptedVersion(t, db)
+	aBasis, okA := acceptedBasis(t, ctx, db, acceptedVer, dirA)
+	bBasis, okB := acceptedBasis(t, ctx, db, acceptedVer, dirB)
+	if !okA || !okB {
+		t.Fatal("expected a and b accepted bases after baseline")
+	}
+	if _, err := beginPendingWithBasis(ctx, db, []folderBasis{aBasis, bBasis}); err != nil {
+		t.Fatalf("beginPendingWithBasis: %v", err)
+	}
+	rewritePreservingMtime(t, filepath.Join(dirA, pairFiles("A")[0]), []byte("y"))
+	if err := os.RemoveAll(dirB); err != nil {
+		t.Fatalf("remove b dir: %v", err)
+	}
+
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil {
+		t.Fatalf("SyncFolders: %v", err)
+	}
+	if res.Outcome != OutcomeIncompletePending || !strings.Contains(res.Reason, "SUSPECT") {
+		t.Fatalf("incomplete reconcile + SUSPECT must be incomplete-pending, got %v (%s)", res.Outcome, res.Reason)
+	}
+}
+
 func TestClassifyExisting(t *testing.T) {
 	base := StatTuple{Known: true, Size: 1, MtimeNs: 10, CtimeNs: 20, Inode: 30}
 	stored := storedEvidence{Tuple: base}

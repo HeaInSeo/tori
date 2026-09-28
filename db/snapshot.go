@@ -321,6 +321,17 @@ func SyncFolders(ctx context.Context, db *sql.DB, rootPath string, foldersExclus
 	if held, reason, eErr := holdOnStatEvidence(ctx, db, statObs); eErr != nil {
 		return SyncResult{}, eErr
 	} else if held {
+		// As with drift above: an incomplete prior reconcile this run left the snapshot pending
+		// with a rewritten projection, so the previous snapshot was NOT retained. Report that
+		// state rather than a degraded HOLD, which would claim no mutation occurred.
+		if st, sErr := readAcceptanceState(ctx, db); sErr != nil {
+			return SyncResult{}, sErr
+		} else if st == acceptancePending {
+			res.Outcome = OutcomeIncompletePending
+			res.Reason = fmt.Sprintf("pending reconciliation incomplete (an accepted folder is temporarily absent) while %s; retry to converge", reason)
+			globallog.Log.Warnf("SyncFolders: %s", res.Reason)
+			return res, nil
+		}
 		res.Outcome = OutcomeDegradedHold
 		res.Scope = ScopeConfirmed
 		res.Coverage = CoverageComplete
