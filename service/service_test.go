@@ -280,6 +280,47 @@ func TestServiceSyncFoldersAppliesConfiguredFolderExclusions(t *testing.T) {
 	}
 }
 
+// TDI-I2B through the real service caller: the accepted snapshot pins the configured
+// source revision, and a configured scope edit is accepted as a new version while the
+// earlier version keeps its revision.
+func TestServiceSyncFoldersPinsAcceptedSourceRevision(t *testing.T) {
+	svc, _ := newTestDataBlockService(t)
+	ctx := context.Background()
+
+	if err := svc.SaveFolders(ctx); err != nil {
+		t.Fatalf("SaveFolders error: %v", err)
+	}
+	if _, err := svc.SyncFolders(ctx); err != nil {
+		t.Fatalf("SyncFolders error: %v", err)
+	}
+	r1, ok, err := d.GetAcceptedSourceBasis(ctx, svc.db)
+	if err != nil || !ok {
+		t.Fatalf("GetAcceptedSourceBasis: ok=%v err=%v", ok, err)
+	}
+	if env := sourceEnvelope(t, svc); r1.SourceID != env.SourceID || r1.RevisionID != env.CurrentRevisionID {
+		t.Fatalf("accepted pin %+v does not name the configured source revision %+v", r1, env)
+	}
+
+	svc.cfg.FilesExclusions = append(svc.cfg.FilesExclusions, "*.bam")
+	res, err := svc.SyncFolders(ctx)
+	if err != nil {
+		t.Fatalf("SyncFolders after scope edit: %v", err)
+	}
+	if res.Outcome != d.OutcomeAcceptedUpdate {
+		t.Fatalf("scope edit = %s (%s), want accepted-update", res.Outcome, res.Reason)
+	}
+	r2, ok, err := d.GetAcceptedSourceBasis(ctx, svc.db)
+	if err != nil || !ok {
+		t.Fatalf("GetAcceptedSourceBasis after edit: ok=%v err=%v", ok, err)
+	}
+	if r2.Version <= r1.Version || r2.RevisionID == r1.RevisionID || r2.SourceID != r1.SourceID {
+		t.Fatalf("scope edit pin = %+v, want a new version of %s under a new revision (was %+v)", r2, r1.SourceID, r1)
+	}
+	if old, ok, err := d.GetSourceBasisAt(ctx, svc.db, r1.Version); err != nil || !ok || old != r1 {
+		t.Fatalf("earlier version pin rewritten: %+v → %+v (ok=%v err=%v)", r1, old, ok, err)
+	}
+}
+
 func TestServiceSyncFoldersRecordsConfiguredCredentialRef(t *testing.T) {
 	svc, rootDir := newTestDataBlockService(t)
 	ctx := context.Background()

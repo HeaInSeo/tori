@@ -952,7 +952,7 @@ func TestI4F_AcceptWorkIncompleteLeavesPending(t *testing.T) {
 	if err := os.RemoveAll(dirA); err != nil {
 		t.Fatalf("remove dir: %v", err)
 	}
-	complete, err := acceptWork(ctx, db, root, nil, nil, []folderBasis{aBasis}, map[string]struct{}{dirA: {}})
+	complete, err := acceptWork(ctx, db, root, nil, nil, []folderBasis{aBasis}, SnapshotSourceBasis{}, map[string]struct{}{dirA: {}})
 	if err != nil {
 		t.Fatalf("acceptWork: %v", err)
 	}

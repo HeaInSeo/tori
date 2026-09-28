@@ -146,9 +146,10 @@ func TestCompareFolders(t *testing.T) {
 		}
 	}()
 
-	// 종속성인 InitializeDatabase 실패 시 테스트를 건너뜀.
+	// In-process :memory: SQLite has no external prerequisite, so a schema init
+	// failure is a regression, not an unavailable environment (tori#23).
 	if err := InitializeDatabase(dbConn); err != nil {
-		t.Skipf("Skipping tests because InitializeDatabase failed: %v", err)
+		t.Fatalf("InitializeDatabase failed: %v", err)
 	}
 
 	var foldersExclusions, filesExclusions []string
