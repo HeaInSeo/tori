@@ -432,6 +432,88 @@ func TestI5P_T09_IncompleteReconcileWithSuspectIsIncompletePending(t *testing.T)
 	}
 }
 
+// chmodUntilCtimeMoves toggles path's mode (a metadata-only change: size, mtime_ns and
+// inode unchanged) until the kernel's ctime actually moved.
+func chmodUntilCtimeMoves(t *testing.T, path string) {
+	t.Helper()
+	info, st := statOf(t, path)
+	origCtime := st.Ctim.Nano()
+	for i := 0; i < 100; i++ {
+		time.Sleep(20 * time.Millisecond)
+		mode := os.FileMode(0o600)
+		if i%2 == 0 {
+			mode = 0o640
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatalf("chmod %s: %v", path, err)
+		}
+		newInfo, newSt := statOf(t, path)
+		if newInfo.Size() != info.Size() || !newInfo.ModTime().Equal(info.ModTime()) || newSt.Ino != st.Ino {
+			t.Fatalf("precondition: size/mtime/inode must be preserved")
+		}
+		if newSt.Ctim.Nano() != origCtime {
+			return
+		}
+	}
+	t.Skip("ctime did not advance on this filesystem; cannot build a SUSPECT fixture")
+}
+
+// I5P-T10: a stat-evidence HOLD must not pre-empt the missing-projection restore. With an
+// accepted frozen basis, a deleted datablock.pb is rebuilt from the accepted DB (never from
+// the held observation) before holding, exactly as the drift HOLD does; the accepted version
+// does not advance and the HOLD stays in force.
+func TestI5P_T10_HoldRestoresMissingProjection(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		mutate func(t *testing.T, target string)
+	}{
+		{"SUSPECT ctime-only change", "SUSPECT", chmodUntilCtimeMoves},
+		{"UNKNOWN tuple", "UNKNOWN", func(t *testing.T, _ string) {
+			orig := statTupleOf
+			statTupleOf = func(os.FileInfo) StatTuple { return StatTuple{} }
+			t.Cleanup(func() { statTupleOf = orig })
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			root := t.TempDir()
+			dir := writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+			db := newAcceptanceDB(t)
+			acceptBaseline(t, db, root)
+
+			verBefore := acceptedVersion(t, db)
+			projection := filepath.Join(root, "datablock.pb")
+			blocksBefore := loadBlocks(t, root)
+			if err := os.Remove(projection); err != nil {
+				t.Fatalf("remove datablock: %v", err)
+			}
+			c.mutate(t, filepath.Join(dir, pairFiles("sample1")[0]))
+
+			res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+			if err != nil {
+				t.Fatalf("SyncFolders: %v", err)
+			}
+			if res.Outcome != OutcomeDegradedHold || !strings.Contains(res.Reason, c.reason) {
+				t.Fatalf("expected degraded-hold %s, got %v (%s)", c.reason, res.Outcome, res.Reason)
+			}
+			if _, statErr := os.Stat(projection); statErr != nil {
+				t.Fatalf("projection not restored under the HOLD: %v", statErr)
+			}
+			if !sameBlocks(loadBlocks(t, root), blocksBefore) {
+				t.Fatalf("restored projection blocks differ from the accepted projection")
+			}
+			if got := acceptedVersion(t, db); got != verBefore {
+				t.Fatalf("accepted version advanced under the HOLD: %d -> %d", verBefore, got)
+			}
+			if st, sErr := readAcceptanceState(ctx, db); sErr != nil || st == acceptancePending {
+				t.Fatalf("acceptance left pending after a complete restore (state=%v err=%v)", st, sErr)
+			}
+		})
+	}
+}
+
 func TestClassifyExisting(t *testing.T) {
 	base := StatTuple{Known: true, Size: 1, MtimeNs: 10, CtimeNs: 20, Inode: 30}
 	stored := storedEvidence{Tuple: base}
