@@ -272,7 +272,9 @@ func recordHintOnly(ctx context.Context, db *sql.DB, hint []statObservation) err
 	return nil
 }
 
-// recordSeedStatEvidenceTx records the tuples observed while seeding a folder's rows.
+// recordSeedStatEvidenceTx records the tuples observed while seeding a folder's rows. Callers
+// pass only the rows the seed actually inserted: re-seeding over an existing inventory must
+// not replace the tuple recorded for an accepted row.
 func recordSeedStatEvidenceTx(ctx context.Context, tx *sql.Tx, folderID int64, files []File) error {
 	if err := ensureStatEvidenceTable(ctx, tx); err != nil {
 		return err

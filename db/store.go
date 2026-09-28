@@ -244,18 +244,36 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 		}
 	}()
 
+	// insert_file.sql 은 같은 이름의 기존 row 를 ON CONFLICT DO NOTHING 으로 남겨 두므로,
+	// 이번 호출이 실제로 새로 넣은 row 만 모은다.
+	var inserted []File
 	for _, file := range fileDetails {
-		if _, err = stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime); err != nil {
+		res, execErr := stmt.ExecContext(ctx, folderID, file.Name, file.Size, file.CreatedTime)
+		if execErr != nil {
 			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 				logger.Infof("rollback failed: %v", rbErr)
 			}
-			return fmt.Errorf("failed to insert file: %w", err)
+			return fmt.Errorf("failed to insert file: %w", execErr)
+		}
+		n, raErr := res.RowsAffected()
+		if raErr != nil {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				logger.Infof("rollback failed: %v", rbErr)
+			}
+			return fmt.Errorf("failed to read inserted row count for %s: %w", file.Name, raErr)
+		}
+		if n > 0 {
+			inserted = append(inserted, file)
 		}
 	}
 
-	// TDI-I5P-1: seed 시 관측한 stat tuple 을 같은 tx 에서 evidence 로 기록한다. tuple 이
-	// UNKNOWN 인 파일은 기록하지 않으며, 다음 SyncFolders 가 fail closed 로 HOLD 한다.
-	if err = recordSeedStatEvidenceTx(ctx, tx, folderID, fileDetails); err != nil {
+	// TDI-I5P-1: seed 시 관측한 stat tuple 을 같은 tx 에서 evidence 로 기록한다. 새로 넣은
+	// row 에 대해서만 기록한다. 이미 있던 (accepted 일 수 있는) row 의 evidence 는 re-seed 가
+	// 덮어쓰지 않는다 — 덮어쓰면 acceptance 없이 baseline 이 바뀌어 same-size rewrite 가 다음
+	// sync 에서 unchanged 로 숨는다. evidence 가 없던 기존 row 는 다음 scan 에서 HINT_ONLY 로
+	// HOLD 된다. tuple 이 UNKNOWN 인 파일은 기록하지 않으며, 다음 SyncFolders 가 fail closed 로
+	// HOLD 한다.
+	if err = recordSeedStatEvidenceTx(ctx, tx, folderID, inserted); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 			logger.Infof("rollback failed: %v", rbErr)
 		}

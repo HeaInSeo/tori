@@ -514,6 +514,76 @@ func TestI5P_T10_HoldRestoresMissingProjection(t *testing.T) {
 	}
 }
 
+// I5P-T11: re-seeding (the snapshot CLI → SaveFolders) over an accepted inventory must not
+// replace the accepted rows' recorded tuples. A same-size, mtime-preserving rewrite made
+// before the re-seed stays SUSPECT/HOLD on the next sync instead of being hidden as
+// unchanged, and the accepted version does not advance. Rows the re-seed newly inserts still
+// get their seed evidence.
+func TestI5P_T11_ReseedKeepsAcceptedStatEvidence(t *testing.T) {
+	t.Run("rewrite before re-seed stays SUSPECT", func(t *testing.T) {
+		ctx := context.Background()
+		root := t.TempDir()
+		dir := writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+		db := newAcceptanceDB(t)
+		acceptBaseline(t, db, root)
+
+		verBefore := acceptedVersion(t, db)
+		evBefore, err := getStatEvidenceByPath(ctx, db, dir)
+		if err != nil {
+			t.Fatalf("evidence before: %v", err)
+		}
+		name := pairFiles("sample1")[0]
+		if _, ok := evBefore[name]; !ok {
+			t.Fatalf("precondition: no accepted evidence for %s", name)
+		}
+		rewritePreservingMtime(t, filepath.Join(dir, name), []byte("y"))
+
+		if err := SaveFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+			t.Fatalf("re-seed SaveFolders: %v", err)
+		}
+		evAfter, err := getStatEvidenceByPath(ctx, db, dir)
+		if err != nil {
+			t.Fatalf("evidence after: %v", err)
+		}
+		if evAfter[name] != evBefore[name] {
+			t.Fatalf("re-seed replaced accepted evidence for %s: %+v -> %+v", name, evBefore[name], evAfter[name])
+		}
+
+		res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+		if err != nil {
+			t.Fatalf("SyncFolders: %v", err)
+		}
+		if res.Outcome == OutcomeUnchanged {
+			t.Fatalf("same-size rewrite hidden as unchanged after re-seed")
+		}
+		if res.Outcome != OutcomeDegradedHold || !strings.Contains(res.Reason, "SUSPECT") {
+			t.Fatalf("expected degraded-hold SUSPECT, got %v (%s)", res.Outcome, res.Reason)
+		}
+		if got := acceptedVersion(t, db); got != verBefore {
+			t.Fatalf("accepted version advanced: %d -> %d", verBefore, got)
+		}
+	})
+
+	t.Run("new row still seeded", func(t *testing.T) {
+		ctx := context.Background()
+		root := t.TempDir()
+		dir := writeRuleFolder(t, root, "set_a", pairFiles("sample1")...)
+		db := newAcceptanceDB(t)
+		acceptBaseline(t, db, root)
+
+		added := pairFiles("sample2")[0]
+		if err := os.WriteFile(filepath.Join(dir, added), []byte("z"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", added, err)
+		}
+		if err := SaveFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+			t.Fatalf("re-seed SaveFolders: %v", err)
+		}
+		if got := evidenceRows(t, db)[filepath.Join(dir, added)]; got != EvidenceStatTuple.String() {
+			t.Fatalf("newly inserted row evidence = %q, want %s", got, EvidenceStatTuple)
+		}
+	})
+}
+
 func TestClassifyExisting(t *testing.T) {
 	base := StatTuple{Known: true, Size: 1, MtimeNs: 10, CtimeNs: 20, Inode: 30}
 	stored := storedEvidence{Tuple: base}
