@@ -1,0 +1,451 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/HeaInSeo/tori/rules"
+)
+
+// TDI-I3M minimum tests 1–9. Each test name carries its packet test number.
+
+func i3mRuleSet(t *testing.T) rules.RuleSet {
+	t.Helper()
+	rs, err := rules.RuleSetFromCanonical(mustCanonicalRule(t))
+	if err != nil {
+		t.Fatalf("rule set: %v", err)
+	}
+	return rs
+}
+
+func mustCanonicalRule(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rule.json"), []byte(ruleJSON), 0o600); err != nil {
+		t.Fatalf("write rule: %v", err)
+	}
+	rs, err := rules.LoadRuleSetFromFile(dir)
+	if err != nil {
+		t.Fatalf("load rule: %v", err)
+	}
+	canonical, _, err := rules.FreezeRuleSet(rs)
+	if err != nil {
+		t.Fatalf("freeze rule: %v", err)
+	}
+	return canonical
+}
+
+// i3mManifest builds a manifest for one folder from file names, in the given order.
+func i3mManifest(t *testing.T, folder string, files []string) PublicationSemanticManifest {
+	t.Helper()
+	subjects, conflicts := rules.PublicationSubjects(files, i3mRuleSet(t))
+	if len(conflicts) != 0 {
+		t.Fatalf("unexpected conflicts: %+v", conflicts)
+	}
+	mf := ManifestFolder{Path: folder, ClassificationRevisionID: "cls-r1"}
+	for _, s := range subjects {
+		ms := ManifestSubject{SubjectKey: s.SubjectKey, Components: s.Components}
+		for _, m := range s.Members {
+			ms.Members = append(ms.Members, ManifestMember{
+				ObservedKey: m.ObservedKey, NormalizedRole: m.NormalizedRole, FileName: m.FileName, Integrity: "size:1",
+			})
+		}
+		mf.Subjects = append(mf.Subjects, ms)
+	}
+	return PublicationSemanticManifest{SourceID: "src-test", SourceRevisionID: "rev-1", Folders: []ManifestFolder{mf}}
+}
+
+func mustPublish(t *testing.T, db *sql.DB, opID string, m PublicationSemanticManifest) PublicationResult {
+	t.Helper()
+	res, err := Publish(context.Background(), db, PublicationRequest{OperationID: opID, Manifest: m})
+	if err != nil {
+		t.Fatalf("Publish(%s): %v", opID, err)
+	}
+	if res.GenerationID == "" {
+		t.Fatalf("Publish(%s) returned no Generation", opID)
+	}
+	return res
+}
+
+func countRows(t *testing.T, db *sql.DB, table string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+func withPublicationCrash(t *testing.T, boundary string) {
+	t.Helper()
+	publicationCrashHookForTest = func(b string) error {
+		if b == boundary {
+			return errors.New("simulated crash at " + b)
+		}
+		return nil
+	}
+	t.Cleanup(func() { publicationCrashHookForTest = nil })
+}
+
+var i3mFilesAB = append(pairFiles("A"), pairFiles("B")...)
+
+// Test 1: same operation + same semantics retried after ack loss → same Generation.
+func TestI3M_T01_RetryAfterAckLossSameGeneration(t *testing.T) {
+	db := newAcceptanceDB(t)
+	m := i3mManifest(t, "runA", i3mFilesAB)
+	first := mustPublish(t, db, "op-1", m)
+	// The ack of `first` is lost; the caller retries the same request.
+	retry := mustPublish(t, db, "op-1", m)
+	if retry.GenerationID != first.GenerationID || !retry.Reconciled {
+		t.Fatalf("retry = %+v, want same Generation %s reconciled", retry, first.GenerationID)
+	}
+	if n := countRows(t, db, "publication_generations"); n != 1 {
+		t.Fatalf("generations = %d, want 1", n)
+	}
+}
+
+// Test 2: same operation ID + changed semantics → conflict, nothing written.
+func TestI3M_T02_SameOperationChangedSemanticsConflicts(t *testing.T) {
+	db := newAcceptanceDB(t)
+	mustPublish(t, db, "op-1", i3mManifest(t, "runA", pairFiles("A")))
+	_, err := Publish(context.Background(), db, PublicationRequest{OperationID: "op-1", Manifest: i3mManifest(t, "runA", i3mFilesAB)})
+	if !errors.Is(err, ErrPublicationConflict) {
+		t.Fatalf("err = %v, want ErrPublicationConflict", err)
+	}
+	if n := countRows(t, db, "publication_generations"); n != 1 {
+		t.Fatalf("generations = %d, want 1", n)
+	}
+	if n := countRows(t, db, "publication_manifests"); n != 1 {
+		t.Fatalf("manifests = %d, want 1 (conflicting manifest must not be recorded)", n)
+	}
+}
+
+// Test 3: two independent operations with an identical manifest → same Generation.
+func TestI3M_T03_IndependentOperationsConverge(t *testing.T) {
+	db := newAcceptanceDB(t)
+	a := mustPublish(t, db, "cycle-1", i3mManifest(t, "runA", i3mFilesAB))
+	b := mustPublish(t, db, "cycle-2", i3mManifest(t, "runA", i3mFilesAB))
+	if a.GenerationID != b.GenerationID || a.ManifestID != b.ManifestID {
+		t.Fatalf("independent operations diverged: %+v vs %+v", a, b)
+	}
+	if b.Reconciled {
+		t.Fatalf("cycle-2 is a new operation, not a retry")
+	}
+	if n := countRows(t, db, "publication_generations"); n != 1 {
+		t.Fatalf("generations = %d, want 1", n)
+	}
+	if n := countRows(t, db, "publication_operations"); n != 2 {
+		t.Fatalf("operations = %d, want 2", n)
+	}
+}
+
+// Test 4: file/list order changes do not change the manifest or Generation.
+func TestI3M_T04_OrderIndependence(t *testing.T) {
+	forward := i3mManifest(t, "runA", i3mFilesAB)
+	reversed := make([]string, len(i3mFilesAB))
+	for i, f := range i3mFilesAB {
+		reversed[len(i3mFilesAB)-1-i] = f
+	}
+	backward := i3mManifest(t, "runA", reversed)
+	// Also permute folder, subject and member order in the manifest itself.
+	two := forward
+	two.Folders = append([]ManifestFolder{{Path: "runB", ClassificationRevisionID: "cls-r1", Subjects: backward.Folders[0].Subjects}}, forward.Folders...)
+	twoPermuted := backward
+	subj := append([]ManifestSubject(nil), backward.Folders[0].Subjects...)
+	for i, j := 0, len(subj)-1; i < j; i, j = i+1, j-1 {
+		subj[i], subj[j] = subj[j], subj[i]
+	}
+	for i := range subj {
+		mem := append([]ManifestMember(nil), subj[i].Members...)
+		for a, b := 0, len(mem)-1; a < b; a, b = a+1, b-1 {
+			mem[a], mem[b] = mem[b], mem[a]
+		}
+		subj[i].Members = mem
+	}
+	twoPermuted.Folders = []ManifestFolder{forward.Folders[0], {Path: "runB", ClassificationRevisionID: "cls-r1", Subjects: subj}}
+
+	_, id1, err := forward.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id2, err := backward.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id1 != id2 {
+		t.Fatalf("file order changed ManifestID: %s vs %s", id1, id2)
+	}
+	_, id3, err := two.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, id4, err := twoPermuted.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id3 != id4 {
+		t.Fatalf("folder/subject/member order changed ManifestID: %s vs %s", id3, id4)
+	}
+	db := newAcceptanceDB(t)
+	if g1, g2 := mustPublish(t, db, "op-f", two), mustPublish(t, db, "op-p", twoPermuted); g1.GenerationID != g2.GenerationID {
+		t.Fatalf("order changed Generation: %s vs %s", g1.GenerationID, g2.GenerationID)
+	}
+}
+
+// Test 5: an unrelated subject addition makes a distinct manifest/Generation while the
+// prior subject's coordinate stays stable.
+func TestI3M_T05_UnrelatedAdditionDistinctGenerationStableCoordinate(t *testing.T) {
+	db := newAcceptanceDB(t)
+	before := mustPublish(t, db, "op-1", i3mManifest(t, "runA", pairFiles("A")))
+	after := mustPublish(t, db, "op-2", i3mManifest(t, "runA", i3mFilesAB))
+	if before.GenerationID == after.GenerationID || before.ManifestID == after.ManifestID {
+		t.Fatalf("subject addition did not produce a distinct Generation")
+	}
+	g1, _, err := GetGeneration(context.Background(), db, before.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g2, _, err := GetGeneration(context.Background(), db, after.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g1.Subjects) != 1 || len(g2.Subjects) != 2 {
+		t.Fatalf("subjects = %d/%d, want 1/2", len(g1.Subjects), len(g2.Subjects))
+	}
+	var found bool
+	for _, s := range g2.Subjects {
+		if s.FolderPath == g1.Subjects[0].FolderPath && s.SubjectKey == g1.Subjects[0].SubjectKey {
+			found = s.SubjectCanonical == g1.Subjects[0].SubjectCanonical
+		}
+	}
+	if !found {
+		t.Fatalf("prior subject %s not stable in the new Generation", g1.Subjects[0].SubjectKey)
+	}
+}
+
+// Test 6: a crash at each persistence boundary cannot duplicate a Generation, and the
+// retry of the same operation converges.
+func TestI3M_T06_CrashAtEachBoundaryNoDuplicate(t *testing.T) {
+	for _, boundary := range []string{boundaryAfterAccept, boundaryBeforeMintEnd, boundaryAfterMint} {
+		t.Run(boundary, func(t *testing.T) {
+			db := newAcceptanceDB(t)
+			m := i3mManifest(t, "runA", i3mFilesAB)
+			withPublicationCrash(t, boundary)
+			if _, err := Publish(context.Background(), db, PublicationRequest{OperationID: "op-1", Manifest: m}); err == nil {
+				t.Fatalf("expected simulated crash at %s", boundary)
+			}
+			publicationCrashHookForTest = nil
+			// A different operation with the same manifest may also arrive first.
+			other := mustPublish(t, db, "op-2", m)
+			retry := mustPublish(t, db, "op-1", m)
+			if retry.GenerationID != other.GenerationID {
+				t.Fatalf("retry Generation %s != %s", retry.GenerationID, other.GenerationID)
+			}
+			if !retry.Reconciled {
+				t.Fatalf("retry after %s should reconcile the accepted operation", boundary)
+			}
+			if n := countRows(t, db, "publication_generations"); n != 1 {
+				t.Fatalf("generations = %d, want 1", n)
+			}
+			if n := countRows(t, db, "publication_generation_subjects"); n != 2 {
+				t.Fatalf("generation subjects = %d, want 2", n)
+			}
+		})
+	}
+}
+
+// Test 7: Generation rows and manifests are immutable after acceptance.
+func TestI3M_T07_GenerationImmutable(t *testing.T) {
+	ctx := context.Background()
+	db := newAcceptanceDB(t)
+	res := mustPublish(t, db, "op-1", i3mManifest(t, "runA", i3mFilesAB))
+	attempts := []string{
+		"UPDATE publication_generations SET manifest_id = 'x'",
+		"DELETE FROM publication_generations",
+		"UPDATE publication_generation_subjects SET subject_canonical = '{}'",
+		"DELETE FROM publication_generation_subjects",
+		"INSERT INTO publication_generation_subjects VALUES ('" + res.GenerationID + "', 'runA', 'extra', 'cls-r1', '{}')",
+		"UPDATE publication_manifests SET canonical = '{}'",
+		"DELETE FROM publication_manifests",
+		"UPDATE publication_operations SET manifest_id = 'x'",
+		"UPDATE publication_operations SET generation_id = 'gen-other'",
+		"DELETE FROM publication_operations",
+	}
+	for _, q := range attempts {
+		if _, err := db.ExecContext(ctx, q); err == nil {
+			t.Errorf("mutation succeeded: %s", q)
+		}
+	}
+	g, ok, err := GetGeneration(ctx, db, res.GenerationID)
+	if err != nil || !ok {
+		t.Fatalf("GetGeneration: ok=%v err=%v", ok, err)
+	}
+	if len(g.Subjects) != 2 || g.ManifestID != res.ManifestID {
+		t.Fatalf("Generation changed: %+v", g)
+	}
+}
+
+// Test 8: a legacy DataBlock rewrite does not mutate Generation truth. The manifest is
+// built from the accepted snapshot, not datablock.pb.
+func TestI3M_T08_DataBlockRewriteDoesNotMutateGeneration(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db := newAcceptanceDB(t)
+	writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	acceptBaseline(t, db, root)
+
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatalf("BuildAcceptedPublicationManifest: %v", err)
+	}
+	res := mustPublish(t, db, "op-1", m)
+	before, _, err := GetGeneration(ctx, db, res.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rewrite the compatibility projection: garbage, then a rebuild from the accepted DB.
+	dbPath := filepath.Join(root, "datablock.pb")
+	if err := os.WriteFile(dbPath, []byte("not a datablock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := regenerateProjectionFromDB(ctx, db, root, nil); err != nil {
+		t.Fatalf("regenerate projection: %v", err)
+	}
+
+	after, _, err := GetGeneration(ctx, db, res.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Subjects) != len(before.Subjects) || after.ManifestID != before.ManifestID {
+		t.Fatalf("Generation changed after DataBlock rewrite")
+	}
+	for i := range before.Subjects {
+		if before.Subjects[i] != after.Subjects[i] {
+			t.Fatalf("subject %d changed: %+v → %+v", i, before.Subjects[i], after.Subjects[i])
+		}
+	}
+	m2, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, id, _ := m2.ManifestID(); id != res.ManifestID {
+		t.Fatalf("manifest after DataBlock rewrite = %s, want %s", id, res.ManifestID)
+	}
+	if strings.Contains(res.GenerationID, "datablock") {
+		t.Fatalf("Generation identity derived from the projection")
+	}
+}
+
+// Test 9: publication has no Auto-Run/Run side effect: it creates only publication
+// tables and writes nothing under the source root.
+func TestI3M_T09_NoRunSideEffect(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db := newAcceptanceDB(t)
+	writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	acceptBaseline(t, db, root)
+
+	tablesBefore := tableNames(t, db)
+	filesBefore := treeListing(t, root)
+
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, db, "op-1", m)
+
+	for name := range tableNames(t, db) {
+		if _, ok := tablesBefore[name]; ok {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if !strings.HasPrefix(lower, "publication_") {
+			t.Errorf("publish created non-publication table %s", name)
+		}
+		for _, forbidden := range []string{"run", "autorun", "auto_run", "sori"} {
+			if strings.Contains(strings.TrimPrefix(lower, "publication_"), forbidden) {
+				t.Errorf("publish created %s table %s", forbidden, name)
+			}
+		}
+	}
+	if after := treeListing(t, root); after != filesBefore {
+		t.Fatalf("publish changed the source tree:\nbefore %s\nafter  %s", filesBefore, after)
+	}
+}
+
+// An unaccepted snapshot cannot be published.
+func TestI3M_BuildManifestRequiresCleanAcceptedSnapshot(t *testing.T) {
+	db := newAcceptanceDB(t)
+	if _, err := BuildAcceptedPublicationManifest(context.Background(), db, t.TempDir()); !errors.Is(err, ErrPublicationNotAccepted) {
+		t.Fatalf("err = %v, want ErrPublicationNotAccepted", err)
+	}
+}
+
+// Relocating the endpoint does not change the manifest (folder paths are root-relative).
+func TestI3M_ManifestIsRootRelative(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	db := newAcceptanceDB(t)
+	writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	acceptBaseline(t, db, root)
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Folders) != 1 || m.Folders[0].Path != "runA" || len(m.Folders[0].Subjects) != 2 {
+		t.Fatalf("manifest folders = %+v", m.Folders)
+	}
+	for _, s := range m.Folders[0].Subjects {
+		for _, mem := range s.Members {
+			if mem.Integrity != "size:1" {
+				t.Fatalf("member %s integrity = %q", mem.FileName, mem.Integrity)
+			}
+		}
+	}
+}
+
+func tableNames(t *testing.T, db *sql.DB) map[string]struct{} {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), "SELECT name FROM sqlite_master WHERE type = 'table'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]struct{})
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		out[n] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func treeListing(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		b.WriteString(p)
+		b.WriteString(":")
+		b.WriteString(info.ModTime().String())
+		b.WriteString(";")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
