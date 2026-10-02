@@ -129,6 +129,12 @@ func (m PublicationSemanticManifest) canonical() (PublicationSemanticManifest, e
 				Components: append([]string{}, s.Components...),
 				Members:    append([]ManifestMember{}, s.Members...),
 			}
+			for _, mem := range cs.Members {
+				if mem.ObservedKey == "" || mem.FileName == "" || mem.Integrity == "" {
+					return PublicationSemanticManifest{}, fmt.Errorf("%w: member observed key, file name and integrity required (subject %s in %s)",
+						ErrPublicationManifestInvalid, s.SubjectKey, f.Path)
+				}
+			}
 			sort.Slice(cs.Members, func(i, j int) bool { return cs.Members[i].ObservedKey < cs.Members[j].ObservedKey })
 			for i := 1; i < len(cs.Members); i++ {
 				if cs.Members[i].ObservedKey == cs.Members[i-1].ObservedKey {
@@ -577,9 +583,13 @@ func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPat
 // read and before the bases and inventory are read. Test-only; nil in production.
 var publicationSnapshotHookForTest func()
 
-// acceptedFolderPathsTx lists the accepted folder paths within tx.
+// acceptedFolderPathsTx lists the accepted folder paths within tx. A folder row a seed
+// inserted after the last version-advancing clean transition has not been accepted and is
+// excluded.
 func acceptedFolderPathsTx(ctx context.Context, tx *sql.Tx) (paths []string, err error) {
-	rows, err := tx.QueryContext(ctx, "SELECT path FROM folders ORDER BY path")
+	rows, err := tx.QueryContext(ctx, `SELECT fo.path FROM folders fo
+		WHERE NOT EXISTS (SELECT 1 FROM folder_unaccepted_seed s WHERE s.folder_id = fo.id)
+		ORDER BY fo.path`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query accepted folders: %w", err)
 	}

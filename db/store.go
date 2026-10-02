@@ -210,6 +210,17 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 		return fmt.Errorf("failed to get folder details: %w", err)
 	}
 
+	// TDI-I3M: 이번 seed 가 folder row 를 새로 넣는지 같은 tx 에서 확인한다 (insert_folder.sql 은
+	// 기존 row 를 ON CONFLICT DO NOTHING 으로 남긴다).
+	var folderExisted bool
+	err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM folders WHERE path = ?)", folderDetails.Path).Scan(&folderExisted)
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Infof("rollback failed: %v", rbErr)
+		}
+		return fmt.Errorf("failed to check existing folder: %w", err)
+	}
+
 	// DB에 폴더 정보 삽입 (insert_folder.sql)
 	err = execSQLTx(ctx, tx, "insert_folder.sql",
 		folderDetails.Path,
@@ -295,6 +306,16 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 			logger.Infof("rollback failed: %v", rbErr)
 		}
 		return err
+	}
+	// 새로 넣은 folder row 는 accepted_version 의 classification basis 가 없으므로, 다음 version
+	// 을 올리는 acceptance 전까지 publication manifest 에서 제외되도록 표시한다.
+	if !folderExisted {
+		if err = markSeededFolderTx(ctx, tx, folderID); err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				logger.Infof("rollback failed: %v", rbErr)
+			}
+			return err
+		}
 	}
 
 	err = execSQLTx(ctx, tx, "update_folders_fromDB.sql", folderID)

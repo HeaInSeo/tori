@@ -31,9 +31,12 @@ const metaKeyFileEpochSeq = "file_accepted_epoch_seq"
 // same transaction. The marker is cleared only by a canonical clean transition (commitClean)
 // that advances accepted_version, which promotes exactly the DB rows the accepted projection
 // was rebuilt from; a no-version-bump restore keeps it. A publication manifest never includes
-// a marked row.
+// a marked row. A folder row a seed inserts is marked the same way in folder_unaccepted_seed:
+// it has no classification basis at the current accepted_version, so the manifest must skip
+// it rather than refuse to build.
 
-// ensureAcceptedEpochTable creates file_accepted_epoch and file_unaccepted_seed if absent.
+// ensureAcceptedEpochTable creates file_accepted_epoch, file_unaccepted_seed and
+// folder_unaccepted_seed if absent.
 // Idempotent, like the other side tables, so an existing DB needs no migration step and the
 // files table is unchanged.
 func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
@@ -54,6 +57,12 @@ func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
 	if _, err := e.ExecContext(ctx, createUnaccepted); err != nil {
 		return fmt.Errorf("failed to ensure file_unaccepted_seed table: %w", err)
 	}
+	const createUnacceptedFolder = `CREATE TABLE IF NOT EXISTS folder_unaccepted_seed (
+		folder_id INTEGER PRIMARY KEY
+	);`
+	if _, err := e.ExecContext(ctx, createUnacceptedFolder); err != nil {
+		return fmt.Errorf("failed to ensure folder_unaccepted_seed table: %w", err)
+	}
 	return nil
 }
 
@@ -65,6 +74,21 @@ func acceptSeededRowsTx(ctx context.Context, e sqlDBTX) error {
 	}
 	if _, err := e.ExecContext(ctx, "DELETE FROM file_unaccepted_seed"); err != nil {
 		return fmt.Errorf("failed to accept seeded rows: %w", err)
+	}
+	if _, err := e.ExecContext(ctx, "DELETE FROM folder_unaccepted_seed"); err != nil {
+		return fmt.Errorf("failed to accept seeded folders: %w", err)
+	}
+	return nil
+}
+
+// markSeededFolderTx marks a folder row the seed just inserted as unaccepted until the next
+// version-advancing clean transition.
+func markSeededFolderTx(ctx context.Context, e sqlDBTX, folderID int64) error {
+	if err := ensureAcceptedEpochTable(ctx, e); err != nil {
+		return err
+	}
+	if _, err := e.ExecContext(ctx, "INSERT OR IGNORE INTO folder_unaccepted_seed (folder_id) VALUES (?)", folderID); err != nil {
+		return fmt.Errorf("failed to mark seeded folder %d unaccepted: %w", folderID, err)
 	}
 	return nil
 }

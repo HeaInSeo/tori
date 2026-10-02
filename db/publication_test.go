@@ -625,6 +625,94 @@ func TestI3M_CommitCleanClearsSeedMarkersOnlyOnVersionAdvance(t *testing.T) {
 	}
 }
 
+// Codex P1 4166471114: a re-seed that inserts a new folder under an accepted root must not
+// wedge publication. The folder has no classification basis at the accepted version, so it
+// is excluded until a version-advancing acceptance, and the accepted manifest stays the same.
+func TestI3M_ReseededNewFolderDoesNotBlockPublication(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	before := mustManifestID(t, db, root)
+
+	dirB := writeRuleFolder(t, root, "runB", pairFiles("C")...)
+	if err := StoreFilesFolderInfo(ctx, db, dirB, acceptanceExclusions); err != nil {
+		t.Fatalf("re-seed new folder: %v", err)
+	}
+	if got := mustManifestID(t, db, root); got != before {
+		t.Fatalf("re-seeded folder changed the accepted ManifestID: %s vs %s", got, before)
+	}
+	if n := countRows(t, db, "folder_unaccepted_seed"); n != 1 {
+		t.Fatalf("folder markers after re-seed = %d, want 1", n)
+	}
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, db, "op-new-folder", m)
+	if manifestHasFile(t, db, root, pairFiles("C")[0]) {
+		t.Fatal("re-seeded folder entered the manifest without an acceptance transition")
+	}
+
+	// A re-scan that does not advance accepted_version (today a reclassify HOLD for the
+	// basis-less folder) keeps the folder out and never blocks publication.
+	if _, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+		t.Fatalf("re-scan: %v", err)
+	}
+	if got := mustManifestID(t, db, root); got != before {
+		t.Fatalf("re-scan changed the accepted ManifestID: %s vs %s", got, before)
+	}
+
+	// The folder marker follows the file markers: a no-version-bump commitClean keeps it,
+	// a version-advancing one clears it.
+	version, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commitClean(ctx, db, version); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, db, "folder_unaccepted_seed"); n != 1 {
+		t.Fatalf("folder markers after no-bump commitClean = %d, want 1", n)
+	}
+	if err := commitClean(ctx, db, version+1); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, db, "folder_unaccepted_seed"); n != 0 {
+		t.Fatalf("folder markers after version-advancing commitClean = %d, want 0", n)
+	}
+}
+
+// Codex P2 4166471147: the exported Publish API rejects a member without an observed key,
+// file name or integrity before anything is written.
+func TestI3M_PublishRejectsIncompleteMembers(t *testing.T) {
+	db := newAcceptanceDB(t)
+	mustPublish(t, db, "op-valid", i3mManifest(t, "runA", pairFiles("A")))
+	tables := []string{"publication_manifests", "publication_generations", "publication_generation_subjects", "publication_operations"}
+	before := make(map[string]int, len(tables))
+	for _, table := range tables {
+		before[table] = countRows(t, db, table)
+	}
+	for name, blank := range map[string]func(*ManifestMember){
+		"observed key": func(m *ManifestMember) { m.ObservedKey = "" },
+		"file name":    func(m *ManifestMember) { m.FileName = "" },
+		"integrity":    func(m *ManifestMember) { m.Integrity = "" },
+	} {
+		m := i3mManifest(t, "runB", pairFiles("B"))
+		blank(&m.Folders[0].Subjects[0].Members[0])
+		_, err := Publish(context.Background(), db, PublicationRequest{OperationID: "op-" + name, Manifest: m})
+		if !errors.Is(err, ErrPublicationManifestInvalid) {
+			t.Fatalf("empty %s: err = %v, want ErrPublicationManifestInvalid", name, err)
+		}
+	}
+	for _, table := range tables {
+		if n := countRows(t, db, table); n != before[table] {
+			t.Fatalf("%s = %d after rejected publishes, want %d", table, n, before[table])
+		}
+	}
+}
+
 // Codex P1 (schema validity): accepted subjects with a missing, extra or unresolved role
 // are excluded from the typed projection, so they must not enter a manifest or Generation.
 func TestI3M_SchemaInvalidSubjectsNotPublished(t *testing.T) {
