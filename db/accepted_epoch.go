@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 )
@@ -66,17 +67,77 @@ func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
 	return nil
 }
 
-// acceptSeededRowsTx clears every unaccepted-seed marker. Called only from a version-advancing
-// canonical clean transition, inside its transaction.
-func acceptSeededRowsTx(ctx context.Context, e sqlDBTX) error {
+// seedFileKey identifies one file_unaccepted_seed marker.
+type seedFileKey struct {
+	folderID int64
+	name     string
+}
+
+// seedFrontier is the set of unaccepted-seed markers that existed when a projection rebuild
+// started. Every marked row and folder in it was in the DB before the rebuild read the
+// accepted rows, so a complete rebuild projected it. A seed that commits after the capture may
+// or may not be in that projection, so its marker is not in the frontier and stays.
+type seedFrontier struct {
+	files   []seedFileKey
+	folders []int64
+}
+
+// captureSeedFrontier reads the current unaccepted-seed markers. It must run before the
+// projection rebuild whose clean transition will promote them.
+func captureSeedFrontier(ctx context.Context, db *sql.DB) (seedFrontier, error) {
+	var fr seedFrontier
+	if err := ensureAcceptedEpochTable(ctx, db); err != nil {
+		return fr, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT folder_id, name FROM file_unaccepted_seed")
+	if err != nil {
+		return fr, fmt.Errorf("failed to read seeded row markers: %w", err)
+	}
+	for rows.Next() {
+		var k seedFileKey
+		if err := rows.Scan(&k.folderID, &k.name); err != nil {
+			_ = rows.Close()
+			return fr, fmt.Errorf("failed to scan seeded row marker: %w", err)
+		}
+		fr.files = append(fr.files, k)
+	}
+	if err := rows.Close(); err != nil {
+		return fr, err
+	}
+	rows, err = db.QueryContext(ctx, "SELECT folder_id FROM folder_unaccepted_seed")
+	if err != nil {
+		return fr, fmt.Errorf("failed to read seeded folder markers: %w", err)
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fr, fmt.Errorf("failed to scan seeded folder marker: %w", err)
+		}
+		fr.folders = append(fr.folders, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fr, err
+	}
+	return fr, nil
+}
+
+// acceptSeededRowsTx clears exactly the unaccepted-seed markers of frontier; markers created
+// after the frontier was captured stay. Called only from a version-advancing canonical clean
+// transition, inside its transaction.
+func acceptSeededRowsTx(ctx context.Context, e sqlDBTX, frontier seedFrontier) error {
 	if err := ensureAcceptedEpochTable(ctx, e); err != nil {
 		return err
 	}
-	if _, err := e.ExecContext(ctx, "DELETE FROM file_unaccepted_seed"); err != nil {
-		return fmt.Errorf("failed to accept seeded rows: %w", err)
+	for _, k := range frontier.files {
+		if _, err := e.ExecContext(ctx, "DELETE FROM file_unaccepted_seed WHERE folder_id = ? AND name = ?", k.folderID, k.name); err != nil {
+			return fmt.Errorf("failed to accept seeded row %s: %w", k.name, err)
+		}
 	}
-	if _, err := e.ExecContext(ctx, "DELETE FROM folder_unaccepted_seed"); err != nil {
-		return fmt.Errorf("failed to accept seeded folders: %w", err)
+	for _, id := range frontier.folders {
+		if _, err := e.ExecContext(ctx, "DELETE FROM folder_unaccepted_seed WHERE folder_id = ?", id); err != nil {
+			return fmt.Errorf("failed to accept seeded folder %d: %w", id, err)
+		}
 	}
 	return nil
 }

@@ -452,6 +452,12 @@ func splitFileName(fileName string, delimiters []string) []string {
 
 // FilesToMap 파일명 리스트 → (RowIdx → (ColumnKey → 파일명)) 구조 생성
 
+// StableSubjectKey is the stable subject key of a coordinate with these components, the same
+// key PublicationSubjects reports, so a consumer can check a key against its components.
+func StableSubjectKey(components []string) string {
+	return subjectCoordinate{components: components}.stableKey()
+}
+
 func (c subjectCoordinate) stableKey() string {
 	parts := make([]string, 0, len(c.components))
 	for _, component := range c.components {

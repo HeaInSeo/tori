@@ -144,6 +144,12 @@ func (m PublicationSemanticManifest) canonical() (PublicationSemanticManifest, e
 			if s.SubjectKey == "" || len(s.Members) == 0 {
 				return PublicationSemanticManifest{}, fmt.Errorf("%w: subject key and members required (%s)", ErrPublicationManifestInvalid, f.Path)
 			}
+			// The key is derived from the coordinate, never chosen: one coordinate has exactly
+			// one key, so the duplicate-key check below also refuses a duplicate coordinate.
+			if len(s.Components) == 0 || s.SubjectKey != rules.StableSubjectKey(s.Components) {
+				return PublicationSemanticManifest{}, fmt.Errorf("%w: subject key %q does not match its components %q (%s)",
+					ErrPublicationManifestInvalid, s.SubjectKey, s.Components, f.Path)
+			}
 			if _, dup := seenSubject[s.SubjectKey]; dup {
 				return PublicationSemanticManifest{}, fmt.Errorf("%w: duplicate subject %s in %s", ErrPublicationManifestInvalid, s.SubjectKey, f.Path)
 			}

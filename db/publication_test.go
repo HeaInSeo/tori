@@ -801,13 +801,17 @@ func TestI3M_CommitCleanClearsSeedMarkersOnlyOnVersionAdvance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commitClean(ctx, db, version); err != nil {
+	frontier, err := captureSeedFrontier(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commitClean(ctx, db, version, frontier); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, db, "file_unaccepted_seed"); n != 2 {
 		t.Fatalf("markers after no-bump commitClean = %d, want 2", n)
 	}
-	if err := commitClean(ctx, db, version+1); err != nil {
+	if err := commitClean(ctx, db, version+1, frontier); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, db, "file_unaccepted_seed"); n != 0 {
@@ -860,17 +864,134 @@ func TestI3M_ReseededNewFolderDoesNotBlockPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commitClean(ctx, db, version); err != nil {
+	frontier, err := captureSeedFrontier(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commitClean(ctx, db, version, frontier); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, db, "folder_unaccepted_seed"); n != 1 {
 		t.Fatalf("folder markers after no-bump commitClean = %d, want 1", n)
 	}
-	if err := commitClean(ctx, db, version+1); err != nil {
+	if err := commitClean(ctx, db, version+1, frontier); err != nil {
 		t.Fatal(err)
 	}
 	if n := countRows(t, db, "folder_unaccepted_seed"); n != 0 {
 		t.Fatalf("folder markers after version-advancing commitClean = %d, want 0", n)
+	}
+}
+
+// seedAfterRebuild makes the next projection rebuild run seed once after it finished and
+// before its clean transition commits: the race window of Codex P1 4170043038.
+func seedAfterRebuild(t *testing.T, seed func()) {
+	t.Helper()
+	done := false
+	crashAfterPublishForTest = func() bool {
+		if !done {
+			done = true
+			seed()
+		}
+		return false
+	}
+	t.Cleanup(func() { crashAfterPublishForTest = nil })
+}
+
+// Codex P1 4170043038 (late file): a seed that commits after the projection rebuild of a
+// version-advancing acceptance is not in that projection, so the clean transition must not
+// promote it. Its rows stay marked and out of the manifest until a later acceptance.
+func TestI3M_LateSeededFileNotPromoted(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	late := pairFiles("C")
+	seedAfterRebuild(t, func() {
+		for _, f := range late {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := StoreFilesFolderInfo(ctx, db, dir, acceptanceExclusions); err != nil {
+			t.Fatalf("late seed: %v", err)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(dir, pairFiles("A")[0]), []byte("zz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("accept: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	crashAfterPublishForTest = nil
+	if n := countRows(t, db, "file_unaccepted_seed"); n != len(late) {
+		t.Fatalf("late seed markers after the acceptance = %d, want %d", n, len(late))
+	}
+	for _, f := range late {
+		if manifestHasFile(t, db, root, f) {
+			t.Fatalf("late-seeded %s was promoted by an acceptance whose projection never had it", f)
+		}
+	}
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustPublish(t, db, "op-late-file", m)
+
+	// The next acceptance rebuilds with the late rows in the DB and promotes them.
+	if err := os.WriteFile(filepath.Join(dir, pairFiles("A")[0]), []byte("zzz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err = SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("re-accept: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	if n := countRows(t, db, "file_unaccepted_seed"); n != 0 {
+		t.Fatalf("markers after the next acceptance = %d, want 0", n)
+	}
+	for _, f := range late {
+		if !manifestHasFile(t, db, root, f) {
+			t.Fatalf("%s not eligible after the next acceptance", f)
+		}
+	}
+}
+
+// Codex P1 4170043038 (late folder): a folder seeded after the rebuild has no classification
+// basis at the version being accepted. It must stay marked, so the manifest skips it and
+// publication is not wedged.
+func TestI3M_LateSeededFolderNotPromoted(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+
+	seedAfterRebuild(t, func() {
+		dirB := writeRuleFolder(t, root, "runB", pairFiles("C")...)
+		if err := StoreFilesFolderInfo(ctx, db, dirB, acceptanceExclusions); err != nil {
+			t.Fatalf("late seed folder: %v", err)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(dir, pairFiles("A")[0]), []byte("zz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("accept: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	crashAfterPublishForTest = nil
+	if n := countRows(t, db, "folder_unaccepted_seed"); n != 1 {
+		t.Fatalf("late folder markers after the acceptance = %d, want 1", n)
+	}
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatalf("late-seeded folder wedged the manifest build: %v", err)
+	}
+	mustPublish(t, db, "op-late-folder", m)
+	if manifestHasFile(t, db, root, pairFiles("C")[0]) {
+		t.Fatal("late-seeded folder entered the manifest")
 	}
 }
 
@@ -899,6 +1020,51 @@ func TestI3M_PublishRejectsIncompleteMembers(t *testing.T) {
 	for _, table := range tables {
 		if n := countRows(t, db, table); n != before[table] {
 			t.Fatalf("%s = %d after rejected publishes, want %d", table, n, before[table])
+		}
+	}
+}
+
+// Codex P2 4170043044: a SubjectKey is derived from its Components. The exported Publish API
+// refuses a key that does not match its components before anything is written, so one
+// coordinate cannot be published under two keys, in two Generations or twice in one.
+func TestI3M_PublishRejectsSubjectKeyMismatch(t *testing.T) {
+	db := newAcceptanceDB(t)
+	valid := i3mManifest(t, "runA", pairFiles("A"))
+	mustPublish(t, db, "op-valid", valid)
+	tables := []string{"publication_manifests", "publication_generations", "publication_generation_subjects", "publication_operations"}
+	before := make(map[string]int, len(tables))
+	for _, table := range tables {
+		before[table] = countRows(t, db, table)
+	}
+	for name, corrupt := range map[string]func(*ManifestFolder){
+		"arbitrary key":      func(f *ManifestFolder) { f.Subjects[0].SubjectKey = "other" },
+		"key of other parts": func(f *ManifestFolder) { f.Subjects[0].Components = []string{"Z"} },
+		"no components":      func(f *ManifestFolder) { f.Subjects[0].Components = nil },
+		"duplicate coordinate under a second key": func(f *ManifestFolder) {
+			dup := f.Subjects[0]
+			dup.SubjectKey = "alias-" + dup.SubjectKey
+			f.Subjects = append(f.Subjects, dup)
+		},
+	} {
+		m := i3mManifest(t, "runA", pairFiles("A"))
+		corrupt(&m.Folders[0])
+		if _, _, err := m.ManifestID(); !errors.Is(err, ErrPublicationManifestInvalid) {
+			t.Fatalf("%s: ManifestID err = %v, want ErrPublicationManifestInvalid", name, err)
+		}
+		_, err := Publish(context.Background(), db, PublicationRequest{OperationID: "op-" + name, Manifest: m})
+		if !errors.Is(err, ErrPublicationManifestInvalid) {
+			t.Fatalf("%s: err = %v, want ErrPublicationManifestInvalid", name, err)
+		}
+	}
+	for _, table := range tables {
+		if n := countRows(t, db, table); n != before[table] {
+			t.Fatalf("%s = %d after rejected publishes, want %d", table, n, before[table])
+		}
+	}
+	// The key PublicationSubjects reports is the derived one.
+	for _, s := range valid.Folders[0].Subjects {
+		if s.SubjectKey != rules.StableSubjectKey(s.Components) {
+			t.Fatalf("PublicationSubjects key %q is not StableSubjectKey(%q)", s.SubjectKey, s.Components)
 		}
 	}
 }
