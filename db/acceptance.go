@@ -660,6 +660,10 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 			_ = tx.Rollback()
 		}
 	}()
+	prevAccepted, err := metaGetInt(ctx, tx, metaKeyAcceptedVersion)
+	if err != nil {
+		return err
+	}
 	if err := metaSet(ctx, tx, metaKeyAcceptedVersion, strconv.FormatInt(target, 10)); err != nil {
 		return err
 	}
@@ -674,9 +678,14 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 		return err
 	}
 	// TDI-I3M: seeded rows cross the acceptance boundary here, atomically with the clean
-	// transition that follows a projection rebuilt from those DB rows.
-	if err := acceptSeededRowsTx(ctx, tx); err != nil {
-		return err
+	// transition that follows a projection rebuilt from those DB rows. Only a transition that
+	// advances accepted_version is an acceptance: the missing-projection / drift / evidence
+	// restore paths re-commit clean at target == accepted ("no version bump"), and must not
+	// admit post-boundary rows into the already-accepted version.
+	if target > prevAccepted {
+		if err := acceptSeededRowsTx(ctx, tx); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit clean transition: %w", err)

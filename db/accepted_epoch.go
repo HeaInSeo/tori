@@ -28,9 +28,10 @@ const metaKeyFileEpochSeq = "file_accepted_epoch_seq"
 // without an acceptance transition; on an already-accepted DB a re-seed can add a new file to
 // an established folder while the snapshot stays clean. Such a row has not crossed the
 // acceptance boundary, so every row a seed inserts is marked in file_unaccepted_seed in the
-// same transaction. The marker is cleared only by the canonical clean transition
-// (commitClean), which promotes exactly the DB rows the accepted projection was rebuilt from,
-// and a publication manifest never includes a marked row.
+// same transaction. The marker is cleared only by a canonical clean transition (commitClean)
+// that advances accepted_version, which promotes exactly the DB rows the accepted projection
+// was rebuilt from; a no-version-bump restore keeps it. A publication manifest never includes
+// a marked row.
 
 // ensureAcceptedEpochTable creates file_accepted_epoch and file_unaccepted_seed if absent.
 // Idempotent, like the other side tables, so an existing DB needs no migration step and the
@@ -56,8 +57,8 @@ func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
 	return nil
 }
 
-// acceptSeededRowsTx clears every unaccepted-seed marker. Called only from the canonical clean
-// transition, inside its transaction.
+// acceptSeededRowsTx clears every unaccepted-seed marker. Called only from a version-advancing
+// canonical clean transition, inside its transaction.
 func acceptSeededRowsTx(ctx context.Context, e sqlDBTX) error {
 	if err := ensureAcceptedEpochTable(ctx, e); err != nil {
 		return err

@@ -549,6 +549,82 @@ func TestI3M_ReseededRowIneligibleUntilAccepted(t *testing.T) {
 	}
 }
 
+// Guardrail P2-1 (restore isolation): restoring a missing projection re-commits clean at the
+// same accepted_version ("no version bump"). That is not an acceptance, so re-seeded rows must
+// stay ineligible and the accepted version must keep its single manifest.
+func TestI3M_RestoreKeepsReseededRowsIneligible(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	before := mustManifestID(t, db, root)
+	version, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seeded := pairFiles("C")
+	for _, f := range seeded {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := StoreFilesFolderInfo(ctx, db, dir, acceptanceExclusions); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "datablock.pb")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || !strings.Contains(res.Reason, "restored missing projection") {
+		t.Fatalf("restore: got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	if v, err := metaGetInt(ctx, db, metaKeyAcceptedVersion); err != nil || v != version {
+		t.Fatalf("restore moved accepted_version %d -> %d (err=%v); this test needs the no-bump path", version, v, err)
+	}
+	if got := mustManifestID(t, db, root); got != before {
+		t.Fatalf("restore changed the manifest of accepted version %d: %s vs %s", version, got, before)
+	}
+	if manifestHasFile(t, db, root, seeded[0]) {
+		t.Fatalf("re-seeded %s entered the manifest through a no-version-bump restore", seeded[0])
+	}
+}
+
+// Every no-version-bump restore (missing projection, drift HOLD, evidence HOLD) re-commits
+// clean through commitClean with target == accepted; only a version advance clears markers.
+func TestI3M_CommitCleanClearsSeedMarkersOnlyOnVersionAdvance(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	for _, f := range pairFiles("C") {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := StoreFilesFolderInfo(ctx, db, dir, acceptanceExclusions); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	version, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commitClean(ctx, db, version); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, db, "file_unaccepted_seed"); n != 2 {
+		t.Fatalf("markers after no-bump commitClean = %d, want 2", n)
+	}
+	if err := commitClean(ctx, db, version+1); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, db, "file_unaccepted_seed"); n != 0 {
+		t.Fatalf("markers after version-advancing commitClean = %d, want 0", n)
+	}
+}
+
 // Codex P1 (schema validity): accepted subjects with a missing, extra or unresolved role
 // are excluded from the typed projection, so they must not enter a manifest or Generation.
 func TestI3M_SchemaInvalidSubjectsNotPublished(t *testing.T) {
