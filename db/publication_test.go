@@ -549,6 +549,50 @@ func TestI3M_ReseededRowIneligibleUntilAccepted(t *testing.T) {
 	}
 }
 
+// Codex P1 (schema validity): accepted subjects with a missing, extra or unresolved role
+// are excluded from the typed projection, so they must not enter a manifest or Generation.
+func TestI3M_SchemaInvalidSubjectsNotPublished(t *testing.T) {
+	root := t.TempDir()
+	invalid := []string{
+		"M_S1_L001_R1_001.fastq.gz",
+		"X_S1_L001_R1_001.fastq.gz", "X_S1_L001_R2_001.fastq.gz", "X_S1_L001_R3_001.fastq.gz",
+		"U_S1_L001_R1_001.fastq.gz", "U_S1_L001_I1_001.fastq.gz",
+	}
+	writeRuleFolder(t, root, "runA", append(pairFiles("A"), invalid...)...)
+	db := newAcceptanceDB(t)
+	// Not acceptBaseline: invalid rows emit a timestamped invalid_files report, so the
+	// boundary does not settle to unchanged. One accepted-update is a clean accepted state.
+	ctx := context.Background()
+	if err := SaveFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+		t.Fatalf("SaveFolders: %v", err)
+	}
+	if res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions); err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("baseline: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Folders) != 1 || len(m.Folders[0].Subjects) != 1 || len(m.Folders[0].Subjects[0].Members) != 2 {
+		t.Fatalf("manifest folders = %+v, want only the valid A subject", m.Folders)
+	}
+	for _, f := range invalid {
+		if manifestHasFile(t, db, root, f) {
+			t.Fatalf("schema-invalid %s entered the manifest", f)
+		}
+	}
+	for _, f := range pairFiles("A") {
+		if !manifestHasFile(t, db, root, f) {
+			t.Fatalf("valid %s missing from the manifest", f)
+		}
+	}
+	mustPublish(t, db, "op-schema", m)
+	if n := countRows(t, db, "publication_generation_subjects"); n != 1 {
+		t.Fatalf("published subjects = %d, want 1", n)
+	}
+}
+
 // Codex P1 (snapshot): a SyncFolders commit racing the manifest build cannot produce a hybrid
 // of version-N bases and a version-N+1 inventory. The build sees exactly version N.
 func TestI3M_ConcurrentSyncNoHybridManifest(t *testing.T) {

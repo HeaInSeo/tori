@@ -948,8 +948,7 @@ func FilterGroupsByHeaders(resultMap map[int]map[string]string, headers []string
 
 	for _, k := range keys {
 		row := resultMap[k]
-		missing, extra := collectMissingAndExtraKeys(headers, row)
-		if len(missing) == 0 && len(extra) == 0 {
+		if rowMatchesHeaders(headers, row) {
 			valid[nextRowIdx] = row
 			nextRowIdx++
 		} else {
@@ -957,6 +956,14 @@ func FilterGroupsByHeaders(resultMap map[int]map[string]string, headers []string
 		}
 	}
 	return valid, invalid
+}
+
+// rowMatchesHeaders is the schema-validity rule shared by FilterGroupsByHeaders and
+// PublicationSubjects: a grouped row is valid only when its role keys are exactly headers
+// (no missing, empty, extra or unresolved role).
+func rowMatchesHeaders(headers []string, row map[string]string) bool {
+	missing, extra := collectMissingAndExtraKeys(headers, row)
+	return len(missing) == 0 && len(extra) == 0
 }
 
 // WriteInvalidFiles invalid 행의 모든 파일명을 <outputDir>/invalid_files_YYYYMMDDhhmmss.txt 로 기록

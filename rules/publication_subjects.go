@@ -29,8 +29,8 @@ type PublishedSubject struct {
 	Members []PublishedMember `json:"members"`
 }
 
-// PublicationSubjects groups fileNames under ruleSet and returns the healthy subjects
-// sorted by SubjectKey, plus the I12 conflicted subjects. A conflicted subject is never
+// PublicationSubjects groups fileNames under ruleSet and returns the healthy,
+// schema-valid subjects sorted by SubjectKey, plus the I12 conflicted subjects. A conflicted subject is never
 // returned as a healthy subject and never gets an arbitrary winner. The result does not
 // depend on the order of fileNames.
 func PublicationSubjects(fileNames []string, ruleSet RuleSet) ([]PublishedSubject, []SubjectConflict) {
@@ -62,6 +62,12 @@ func PublicationSubjects(fileNames []string, ruleSet RuleSet) ([]PublishedSubjec
 
 	out := make([]PublishedSubject, 0, len(subjects))
 	for key, a := range subjects {
+		// Same schema-validity filter as the canonical FileBlock path
+		// (FilterGroupsByHeaders): a subject with a missing, extra or unresolved role is
+		// not part of the accepted typed projection, so it is never published.
+		if !rowMatchesHeaders(ruleSet.Header, a.members) {
+			continue
+		}
 		members := make([]PublishedMember, 0, len(a.members))
 		for observed, file := range a.members {
 			role, _ := NormalizeRoleKey(observed, ruleSet)
