@@ -109,8 +109,12 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 	}
 
 	// TDI-I5P-1: stat evidence side table 을 같은 tx 에서 행 변경과 일치시킨다.
+	// TDI-I3M: accepted change epoch 도 같은 tx 에서 행 변경과 일치시킨다.
 	if len(diffs) > 0 || len(changes) > 0 {
 		if eErr := ensureStatEvidenceTable(ctx, tx); eErr != nil {
+			return eErr
+		}
+		if eErr := ensureAcceptedEpochTable(ctx, tx); eErr != nil {
 			return eErr
 		}
 	}
@@ -119,10 +123,16 @@ func UpdateDB(ctx context.Context, db *sql.DB, diffs []FolderDiff, changes []Fil
 			if eErr := deleteFolderStatEvidence(ctx, tx, diffs[i].FolderID); eErr != nil {
 				return eErr
 			}
+			if eErr := deleteFolderAcceptedEpochs(ctx, tx, diffs[i].FolderID); eErr != nil {
+				return eErr
+			}
 		}
 	}
 	for i := range changes {
 		if eErr := recordChangeEvidenceTx(ctx, tx, changes[i]); eErr != nil {
+			return eErr
+		}
+		if eErr := recordChangeEpochTx(ctx, tx, changes[i]); eErr != nil {
 			return eErr
 		}
 	}
@@ -274,6 +284,13 @@ func StoreFilesFolderInfo(ctx context.Context, db *sql.DB, folderPath string, ex
 	// HOLD 된다. tuple 이 UNKNOWN 인 파일은 기록하지 않으며, 다음 SyncFolders 가 fail closed 로
 	// HOLD 한다.
 	if err = recordSeedStatEvidenceTx(ctx, tx, folderID, inserted); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Infof("rollback failed: %v", rbErr)
+		}
+		return err
+	}
+	// TDI-I3M: 새로 넣은 row 에만 accepted change epoch 를 부여한다 (기존 row 의 epoch 는 유지).
+	if err = recordSeedEpochsTx(ctx, tx, folderID, inserted); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
 			logger.Infof("rollback failed: %v", rbErr)
 		}

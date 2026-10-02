@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HeaInSeo/tori/rules"
 )
@@ -403,10 +404,141 @@ func TestI3M_ManifestIsRootRelative(t *testing.T) {
 	}
 	for _, s := range m.Folders[0].Subjects {
 		for _, mem := range s.Members {
-			if mem.Integrity != "size:1" {
+			if !strings.HasPrefix(mem.Integrity, "size:1;accepted-change:") {
 				t.Fatalf("member %s integrity = %q", mem.FileName, mem.Integrity)
 			}
 		}
+	}
+}
+
+func mustManifestID(t *testing.T, db *sql.DB, root string) string {
+	t.Helper()
+	m, err := BuildAcceptedPublicationManifest(context.Background(), db, root)
+	if err != nil {
+		t.Fatalf("BuildAcceptedPublicationManifest: %v", err)
+	}
+	_, id, err := m.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// replaceSameLength rewrites path with different bytes of the same length and moves its
+// mtime, so SyncFolders observes and accepts it as modified.
+func replaceSameLength(t *testing.T, path string, content []byte) {
+	t.Helper()
+	info, _ := statOf(t, path)
+	if int64(len(content)) != info.Size() {
+		t.Fatalf("precondition: replacement must keep size %d", info.Size())
+	}
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("rewrite %s: %v", path, err)
+	}
+	moved := info.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(path, moved, moved); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+}
+
+// Codex P1 (content identity): an accepted same-length content change must not reuse the
+// prior ManifestID/Generation, while an unchanged re-scan still converges.
+func TestI3M_SameLengthChangeDistinctManifest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	before := mustManifestID(t, db, root)
+
+	replaceSameLength(t, filepath.Join(dir, i3mFilesAB[0]), []byte("y"))
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("same-length change: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	after := mustManifestID(t, db, root)
+	if after == before {
+		t.Fatalf("same-length content change reused ManifestID %s", before)
+	}
+
+	res, err = SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeUnchanged {
+		t.Fatalf("settle: expected unchanged, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	if again := mustManifestID(t, db, root); again != after {
+		t.Fatalf("unchanged re-scan changed ManifestID: %s vs %s", again, after)
+	}
+
+	mb, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := mustPublish(t, db, "op-after", mb)
+	if g.ManifestID == before {
+		t.Fatalf("published Generation reuses the pre-change manifest")
+	}
+}
+
+// Codex P1 (snapshot): a SyncFolders commit racing the manifest build cannot produce a hybrid
+// of version-N bases and a version-N+1 inventory. The build sees exactly version N.
+func TestI3M_ConcurrentSyncNoHybridManifest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	versionN := mustManifestID(t, db, root)
+
+	replaceSameLength(t, filepath.Join(dir, i3mFilesAB[0]), []byte("y"))
+	if err := os.WriteFile(filepath.Join(dir, i3mFilesAB[1]), []byte("zz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var raced bool
+	publicationSnapshotHookForTest = func() {
+		publicationSnapshotHookForTest = nil
+		raced = true
+		syncCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		res, err := SyncFolders(syncCtx, db, root, nil, acceptanceExclusions)
+		t.Logf("racing SyncFolders inside the snapshot read: outcome=%v err=%v", res.Outcome, err)
+	}
+	t.Cleanup(func() { publicationSnapshotHookForTest = nil })
+
+	during := mustManifestID(t, db, root)
+	if !raced {
+		t.Fatal("snapshot hook did not run")
+	}
+	if during != versionN {
+		t.Fatalf("manifest built during a racing sync = %s, want the version-N manifest %s (hybrid snapshot)", during, versionN)
+	}
+
+	// After the race, a sync commits version N+1 and the manifest moves as a whole.
+	for i := 0; i < 2; i++ {
+		if _, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions); err != nil {
+			t.Fatalf("SyncFolders after race: %v", err)
+		}
+	}
+	m, err := BuildAcceptedPublicationManifest(ctx, db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, next, err := m.ManifestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == versionN {
+		t.Fatalf("manifest did not advance after the accepted change")
+	}
+	var sawNewSize bool
+	for _, s := range m.Folders[0].Subjects {
+		for _, mem := range s.Members {
+			if mem.FileName == i3mFilesAB[1] {
+				sawNewSize = strings.HasPrefix(mem.Integrity, "size:2;")
+			}
+		}
+	}
+	if !sawNewSize {
+		t.Fatalf("version N+1 manifest does not carry the accepted inventory: %+v", m.Folders[0].Subjects)
 	}
 }
 

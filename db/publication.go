@@ -44,7 +44,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 
 	"github.com/HeaInSeo/tori/rules"
 )
@@ -475,60 +474,85 @@ func GetGeneration(ctx context.Context, db *sql.DB, generationID string) (Genera
 // under; folder paths are recorded relative to it. Conflicted (I12) subjects are not
 // published.
 //
-// Integrity: for the supported local POSIX profile the accepted inventory records the
-// file size, so a member's integrity identity is "size:<bytes>". No content digest exists
-// yet; that is a residual of this profile, not something this function invents.
+// Integrity: the local POSIX profile records no content digest, so a member's integrity
+// identity is "size:<bytes>" plus the row's accepted change epoch (accepted_epoch.go). A
+// same-length content change accepted as "modified" therefore yields a distinct manifest.
+//
+// Snapshot: acceptance state, accepted_version, the pinned bases, folders, files and epochs
+// are all read inside ONE database transaction, so a SyncFolders commit that lands while the
+// manifest is being built can never mix version-N bases with a version-N+1 inventory.
 func BuildAcceptedPublicationManifest(ctx context.Context, db *sql.DB, rootPath string) (PublicationSemanticManifest, error) {
-	state, err := readAcceptanceState(ctx, db)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return PublicationSemanticManifest{}, fmt.Errorf("failed to begin accepted snapshot read: %w", err)
+	}
+	defer func() {
+		if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+			logger.Warnf("accepted snapshot read rollback failed: %v", rbErr)
+		}
+	}()
+	return buildAcceptedPublicationManifestTx(ctx, tx, rootPath)
+}
+
+func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPath string) (PublicationSemanticManifest, error) {
+	state, ok, err := metaGet(ctx, tx, metaKeyAcceptanceState)
 	if err != nil {
 		return PublicationSemanticManifest{}, err
 	}
-	acceptedVer, err := metaGetInt(ctx, db, metaKeyAcceptedVersion)
+	if !ok {
+		state = acceptanceClean
+	}
+	acceptedVer, err := metaGetInt(ctx, tx, metaKeyAcceptedVersion)
 	if err != nil {
 		return PublicationSemanticManifest{}, err
 	}
 	if state != acceptanceClean || acceptedVer == 0 {
 		return PublicationSemanticManifest{}, fmt.Errorf("%w (state=%s accepted=v%d)", ErrPublicationNotAccepted, state, acceptedVer)
 	}
-	src, ok, err := getSourceBasis(ctx, db, acceptedVer)
+	if publicationSnapshotHookForTest != nil {
+		publicationSnapshotHookForTest()
+	}
+	src, ok, err := getSourceBasis(ctx, tx, acceptedVer)
 	if err != nil {
 		return PublicationSemanticManifest{}, err
 	}
 	if !ok {
 		return PublicationSemanticManifest{}, fmt.Errorf("%w: no source basis pinned at v%d", ErrPublicationNotAccepted, acceptedVer)
 	}
-	folders, err := GetFoldersFromDB(db)
+	if err := ensureAcceptedEpochTable(ctx, tx); err != nil {
+		return PublicationSemanticManifest{}, err
+	}
+	folders, err := acceptedFolderPathsTx(ctx, tx)
 	if err != nil {
 		return PublicationSemanticManifest{}, err
 	}
 	m := PublicationSemanticManifest{SourceID: src.SourceID, SourceRevisionID: src.RevisionID}
-	for _, folder := range folders {
-		basis, ok, err := getSemantics(ctx, db, acceptedVer, folder.Path)
+	for _, folderPath := range folders {
+		basis, ok, err := getSemantics(ctx, tx, acceptedVer, folderPath)
 		if err != nil {
 			return PublicationSemanticManifest{}, err
 		}
 		if !ok {
 			return PublicationSemanticManifest{}, fmt.Errorf("%w: %v (folder %s at v%d)",
-				ErrPublicationNotAccepted, ErrFrozenBasisUnavailable, folder.Path, acceptedVer)
+				ErrPublicationNotAccepted, ErrFrozenBasisUnavailable, folderPath, acceptedVer)
 		}
 		ruleSet, err := rules.RuleSetFromCanonical(basis.Canonical)
 		if err != nil {
 			return PublicationSemanticManifest{}, err
 		}
-		files, err := GetFilesByPathFromDB(db, folder.Path)
+		files, err := acceptedFileIntegrityTx(ctx, tx, folderPath)
 		if err != nil {
 			return PublicationSemanticManifest{}, err
 		}
-		sizes := make(map[string]int64, len(files))
 		names := make([]string, 0, len(files))
-		for _, f := range files {
-			sizes[f.Name] = f.Size
-			names = append(names, f.Name)
+		for name := range files {
+			names = append(names, name)
 		}
-		rel, err := filepath.Rel(rootPath, folder.Path)
-		if err != nil || !pathWithinRoot(folder.Path, rootPath) {
+		sort.Strings(names)
+		rel, err := filepath.Rel(rootPath, folderPath)
+		if err != nil || !pathWithinRoot(folderPath, rootPath) {
 			return PublicationSemanticManifest{}, fmt.Errorf("%w: accepted folder %s is outside root %s",
-				ErrPublicationNotAccepted, folder.Path, rootPath)
+				ErrPublicationNotAccepted, folderPath, rootPath)
 		}
 		subjects, _ := rules.PublicationSubjects(names, ruleSet)
 		mf := ManifestFolder{Path: filepath.ToSlash(rel), ClassificationRevisionID: basis.RevisionID}
@@ -539,7 +563,7 @@ func BuildAcceptedPublicationManifest(ctx context.Context, db *sql.DB, rootPath 
 					ObservedKey:    mem.ObservedKey,
 					NormalizedRole: mem.NormalizedRole,
 					FileName:       mem.FileName,
-					Integrity:      "size:" + strconv.FormatInt(sizes[mem.FileName], 10),
+					Integrity:      files[mem.FileName],
 				})
 			}
 			mf.Subjects = append(mf.Subjects, ms)
@@ -547,4 +571,57 @@ func BuildAcceptedPublicationManifest(ctx context.Context, db *sql.DB, rootPath 
 		m.Folders = append(m.Folders, mf)
 	}
 	return m, nil
+}
+
+// publicationSnapshotHookForTest runs inside the snapshot read, after accepted_version is
+// read and before the bases and inventory are read. Test-only; nil in production.
+var publicationSnapshotHookForTest func()
+
+// acceptedFolderPathsTx lists the accepted folder paths within tx.
+func acceptedFolderPathsTx(ctx context.Context, tx *sql.Tx) (paths []string, err error) {
+	rows, err := tx.QueryContext(ctx, "SELECT path FROM folders ORDER BY path")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query accepted folders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("failed to scan accepted folder: %w", err)
+		}
+		paths = append(paths, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read accepted folders: %w", err)
+	}
+	return paths, nil
+}
+
+// acceptedFileIntegrityTx maps each accepted file of folderPath to its member integrity
+// identity, within tx.
+func acceptedFileIntegrityTx(ctx context.Context, tx *sql.Tx, folderPath string) (map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT f.name, f.size, e.epoch
+		FROM files f JOIN folders fo ON f.folder_id = fo.id
+		LEFT JOIN file_accepted_epoch e ON e.folder_id = f.folder_id AND e.name = f.name
+		WHERE fo.path = ?`, folderPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query accepted files for %s: %w", folderPath, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]string)
+	for rows.Next() {
+		var (
+			name  string
+			size  int64
+			epoch sql.NullInt64
+		)
+		if err := rows.Scan(&name, &size, &epoch); err != nil {
+			return nil, fmt.Errorf("failed to scan accepted file for %s: %w", folderPath, err)
+		}
+		out[name] = memberIntegrity(size, epoch.Int64, epoch.Valid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read accepted files for %s: %w", folderPath, err)
+	}
+	return out, nil
 }
