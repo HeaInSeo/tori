@@ -85,41 +85,52 @@ type seedFrontier struct {
 // captureSeedFrontier reads the current unaccepted-seed markers. It must run before the
 // projection rebuild whose clean transition will promote them.
 func captureSeedFrontier(ctx context.Context, db *sql.DB) (seedFrontier, error) {
-	var fr seedFrontier
 	if err := ensureAcceptedEpochTable(ctx, db); err != nil {
-		return fr, err
+		return seedFrontier{}, err
 	}
+	files, err := seededFileMarkers(ctx, db)
+	if err != nil {
+		return seedFrontier{}, err
+	}
+	folders, err := seededFolderMarkers(ctx, db)
+	if err != nil {
+		return seedFrontier{}, err
+	}
+	return seedFrontier{files: files, folders: folders}, nil
+}
+
+func seededFileMarkers(ctx context.Context, db *sql.DB) ([]seedFileKey, error) {
 	rows, err := db.QueryContext(ctx, "SELECT folder_id, name FROM file_unaccepted_seed")
 	if err != nil {
-		return fr, fmt.Errorf("failed to read seeded row markers: %w", err)
+		return nil, fmt.Errorf("failed to read seeded row markers: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
+	var out []seedFileKey
 	for rows.Next() {
 		var k seedFileKey
 		if err := rows.Scan(&k.folderID, &k.name); err != nil {
-			_ = rows.Close()
-			return fr, fmt.Errorf("failed to scan seeded row marker: %w", err)
+			return nil, fmt.Errorf("failed to scan seeded row marker: %w", err)
 		}
-		fr.files = append(fr.files, k)
+		out = append(out, k)
 	}
-	if err := rows.Close(); err != nil {
-		return fr, err
-	}
-	rows, err = db.QueryContext(ctx, "SELECT folder_id FROM folder_unaccepted_seed")
+	return out, rows.Err()
+}
+
+func seededFolderMarkers(ctx context.Context, db *sql.DB) ([]int64, error) {
+	rows, err := db.QueryContext(ctx, "SELECT folder_id FROM folder_unaccepted_seed")
 	if err != nil {
-		return fr, fmt.Errorf("failed to read seeded folder markers: %w", err)
+		return nil, fmt.Errorf("failed to read seeded folder markers: %w", err)
 	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return fr, fmt.Errorf("failed to scan seeded folder marker: %w", err)
+			return nil, fmt.Errorf("failed to scan seeded folder marker: %w", err)
 		}
-		fr.folders = append(fr.folders, id)
+		out = append(out, id)
 	}
-	if err := rows.Close(); err != nil {
-		return fr, err
-	}
-	return fr, nil
+	return out, rows.Err()
 }
 
 // acceptSeededRowsTx clears exactly the unaccepted-seed markers of frontier; markers created
