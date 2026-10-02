@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -489,6 +490,63 @@ func TestI3M_UnavailableRecordedEndpointRefused(t *testing.T) {
 	}
 }
 
+// Codex P2 4169170568: the endpoint identity is content-addressed. A source_endpoints row
+// whose canonical value was rewritten under the pinned endpoint_id (another valid root, or
+// only another credential) no longer hashes to that ID. The build is refused for both the
+// recorded and the rewritten root, so the rewritten root cannot mint another ManifestID.
+// Nothing is written, and restoring the row restores the same ManifestID.
+func TestI3M_RewrittenRecordedEndpointRefused(t *testing.T) {
+	ctx := context.Background()
+	for name, rewrite := range map[string]func(ep *SourceAccessEndpoint, parent string){
+		"ancestor-root":   func(ep *SourceAccessEndpoint, parent string) { ep.RootDir = parent },
+		"credential-only": func(ep *SourceAccessEndpoint, _ string) { ep.CredentialRef += "-rotated" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			root := filepath.Join(parent, "source")
+			db := newAcceptanceDB(t)
+			writeRuleFolder(t, root, "runA", i3mFilesAB...)
+			acceptBaseline(t, db, root)
+			want := mustManifestID(t, db, root)
+			saved := endpointRows(t, db)
+			if len(saved) != 1 {
+				t.Fatalf("source_endpoints rows = %d, want 1", len(saved))
+			}
+			before := dbObjects(t, db)
+			var ep SourceAccessEndpoint
+			if err := json.Unmarshal([]byte(saved[0][2]), &ep); err != nil {
+				t.Fatal(err)
+			}
+			rewrite(&ep, parent)
+			canonical, _, err := ep.EndpointID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, "UPDATE source_endpoints SET canonical = ?", canonical); err != nil {
+				t.Fatal(err)
+			}
+			corrupted := endpointRows(t, db)
+			for _, try := range []string{root, ep.RootDir} {
+				if m, err := BuildAcceptedPublicationManifest(ctx, db, try); !errors.Is(err, ErrPublicationNotAccepted) {
+					t.Fatalf("root %s with rewritten endpoint: manifest %+v err = %v, want ErrPublicationNotAccepted", try, m.Folders, err)
+				}
+			}
+			if got := endpointRows(t, db); !reflect.DeepEqual(got, corrupted) {
+				t.Fatalf("refused build changed source_endpoints: %v -> %v", corrupted, got)
+			}
+			if after := dbObjects(t, db); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused build changed the schema: %v -> %v", before, after)
+			}
+			if _, err := db.ExecContext(ctx, "UPDATE source_endpoints SET canonical = ?", saved[0][2]); err != nil {
+				t.Fatal(err)
+			}
+			if got := mustManifestID(t, db, root); got != want {
+				t.Fatalf("restored endpoint changed ManifestID %s -> %s", want, got)
+			}
+		})
+	}
+}
+
 // endpointRows returns every source_endpoints row as {source_id, endpoint_id, canonical,
 // first_seen_at} in key order.
 func endpointRows(t *testing.T, db *sql.DB) [][4]string {
@@ -842,6 +900,41 @@ func TestI3M_PublishRejectsIncompleteMembers(t *testing.T) {
 		if n := countRows(t, db, table); n != before[table] {
 			t.Fatalf("%s = %d after rejected publishes, want %d", table, n, before[table])
 		}
+	}
+}
+
+// Codex P2 4169170578: ManifestFolder.Path has one spelling per folder. The exported
+// Publish API rejects absolute, traversal, backslash and non-clean spellings before
+// anything is written, so "./runA" cannot mint a Generation next to "runA". Clean nested
+// paths and "." (the source root) are still accepted.
+func TestI3M_PublishRejectsNonCanonicalFolderPaths(t *testing.T) {
+	db := newAcceptanceDB(t)
+	mustPublish(t, db, "op-valid", i3mManifest(t, "runA", pairFiles("A")))
+	tables := []string{"publication_manifests", "publication_generations", "publication_generation_subjects", "publication_operations"}
+	before := make(map[string]int, len(tables))
+	for _, table := range tables {
+		before[table] = countRows(t, db, table)
+	}
+	for _, p := range []string{
+		"/runA", "./runA", "runA/", "runA/.", "runA/../runA", "../runA", "..", "runA/..",
+		"run//A", "runA/./sub", `runA\sub`, `.\runA`,
+	} {
+		m := i3mManifest(t, p, pairFiles("A"))
+		if _, _, err := m.ManifestID(); !errors.Is(err, ErrPublicationManifestInvalid) {
+			t.Fatalf("ManifestID with folder %q: err = %v, want ErrPublicationManifestInvalid", p, err)
+		}
+		_, err := Publish(context.Background(), db, PublicationRequest{OperationID: "op-" + p, Manifest: m})
+		if !errors.Is(err, ErrPublicationManifestInvalid) {
+			t.Fatalf("Publish with folder %q: err = %v, want ErrPublicationManifestInvalid", p, err)
+		}
+	}
+	for _, table := range tables {
+		if n := countRows(t, db, table); n != before[table] {
+			t.Fatalf("%s = %d after rejected publishes, want %d", table, n, before[table])
+		}
+	}
+	for _, p := range []string{".", "runA/sub", "run.A/..sub"} {
+		mustPublish(t, db, "op-ok-"+p, i3mManifest(t, p, pairFiles("A")))
 	}
 }
 

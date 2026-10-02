@@ -42,8 +42,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/HeaInSeo/tori/rules"
 )
@@ -90,6 +92,25 @@ type ManifestFolder struct {
 	Subjects                 []ManifestSubject `json:"subjects"`
 }
 
+// canonicalFolderPath reports whether p is the one spelling of a root-relative folder
+// path: slash-separated, not absolute, no backslash, unchanged by path.Clean, and with no
+// "." or ".." segment. "." alone is the source root itself. Any other spelling of the
+// same folder (for example "./runA" or "runA/") would hash to a different ManifestID.
+func canonicalFolderPath(p string) bool {
+	if p == "." {
+		return true
+	}
+	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, `\`) || path.Clean(p) != p {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // PublicationSemanticManifest is the exact frozen meaning of one publication.
 type PublicationSemanticManifest struct {
 	SourceID         string           `json:"sourceId"`
@@ -109,6 +130,9 @@ func (m PublicationSemanticManifest) canonical() (PublicationSemanticManifest, e
 	for _, f := range m.Folders {
 		if f.Path == "" || f.ClassificationRevisionID == "" {
 			return PublicationSemanticManifest{}, fmt.Errorf("%w: folder path/classification revision required", ErrPublicationManifestInvalid)
+		}
+		if !canonicalFolderPath(f.Path) {
+			return PublicationSemanticManifest{}, fmt.Errorf("%w: folder path %q is not a clean root-relative slash path", ErrPublicationManifestInvalid, f.Path)
 		}
 		if _, dup := seenFolder[f.Path]; dup {
 			return PublicationSemanticManifest{}, fmt.Errorf("%w: duplicate folder %s", ErrPublicationManifestInvalid, f.Path)
@@ -590,7 +614,9 @@ func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPat
 }
 
 // recordedEndpointRoot returns the cleaned access root of the endpoint that src pins. A
-// basis whose endpoint row is missing or unreadable is refused rather than trusted.
+// basis whose endpoint row is missing or unreadable is refused rather than trusted, and so
+// is a row whose content no longer hashes to the pinned EndpointID: the endpoint identity
+// is content-addressed, so a different root under the same ID is not the pinned endpoint.
 func recordedEndpointRoot(ctx context.Context, e sqlDBTX, src SnapshotSourceBasis) (string, error) {
 	var canonical string
 	err := e.QueryRowContext(ctx,
@@ -605,6 +631,9 @@ func recordedEndpointRoot(ctx context.Context, e sqlDBTX, src SnapshotSourceBasi
 	var ep SourceAccessEndpoint
 	if err := json.Unmarshal([]byte(canonical), &ep); err != nil || ep.RootDir == "" {
 		return "", fmt.Errorf("%w: pinned access endpoint %s has no readable root", ErrPublicationNotAccepted, shortRev(src.EndpointID))
+	}
+	if _, id, err := ep.EndpointID(); err != nil || id != src.EndpointID {
+		return "", fmt.Errorf("%w: recorded access endpoint does not match pinned endpoint %s", ErrPublicationNotAccepted, shortRev(src.EndpointID))
 	}
 	return filepath.Clean(ep.RootDir), nil
 }
