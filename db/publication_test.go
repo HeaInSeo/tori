@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -437,6 +438,100 @@ func TestI3M_ManifestBoundToRecordedRoot(t *testing.T) {
 	if got := mustManifestID(t, db, root+string(filepath.Separator)+"."+string(filepath.Separator)); got != want {
 		t.Fatalf("equivalent spelling of the recorded root changed ManifestID %s -> %s", want, got)
 	}
+}
+
+// The endpoint row pinned by the accepted source basis is the only trusted root. If it
+// is missing or unreadable, the manifest build is refused even for the recorded root,
+// nothing is written, and restoring the row restores the same ManifestID.
+func TestI3M_UnavailableRecordedEndpointRefused(t *testing.T) {
+	ctx := context.Background()
+	for name, corrupt := range map[string]string{
+		"missing":       "DELETE FROM source_endpoints",
+		"unreadable":    "UPDATE source_endpoints SET canonical = 'not json'",
+		"no-root":       "UPDATE source_endpoints SET canonical = '{}'",
+		"empty-root":    `UPDATE source_endpoints SET canonical = json_set(canonical, '$.rootDir', '')`,
+		"wrong-pointer": "UPDATE source_endpoints SET endpoint_id = endpoint_id || '-moved'",
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			db := newAcceptanceDB(t)
+			writeRuleFolder(t, root, "runA", i3mFilesAB...)
+			acceptBaseline(t, db, root)
+			want := mustManifestID(t, db, root)
+			saved := endpointRows(t, db)
+			before := dbObjects(t, db)
+			if _, err := db.ExecContext(ctx, corrupt); err != nil {
+				t.Fatalf("%s: %v", corrupt, err)
+			}
+			corrupted := endpointRows(t, db)
+			if m, err := BuildAcceptedPublicationManifest(ctx, db, root); !errors.Is(err, ErrPublicationNotAccepted) {
+				t.Fatalf("recorded root with %s endpoint: manifest %+v err = %v, want ErrPublicationNotAccepted", name, m.Folders, err)
+			}
+			if got := endpointRows(t, db); !reflect.DeepEqual(got, corrupted) {
+				t.Fatalf("refused build changed source_endpoints: %v -> %v", corrupted, got)
+			}
+			if after := dbObjects(t, db); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused build changed the schema: %v -> %v", before, after)
+			}
+			if _, err := db.ExecContext(ctx, "DELETE FROM source_endpoints"); err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range saved {
+				if _, err := db.ExecContext(ctx, "INSERT INTO source_endpoints (source_id, endpoint_id, canonical, first_seen_at) VALUES (?, ?, ?, ?)",
+					r[0], r[1], r[2], r[3]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := mustManifestID(t, db, root); got != want {
+				t.Fatalf("restored endpoint changed ManifestID %s -> %s", want, got)
+			}
+		})
+	}
+}
+
+// endpointRows returns every source_endpoints row as {source_id, endpoint_id, canonical,
+// first_seen_at} in key order.
+func endpointRows(t *testing.T, db *sql.DB) [][4]string {
+	t.Helper()
+	rows, err := db.Query("SELECT source_id, endpoint_id, canonical, first_seen_at FROM source_endpoints ORDER BY source_id, endpoint_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out [][4]string
+	for rows.Next() {
+		var r [4]string
+		if err := rows.Scan(&r[0], &r[1], &r[2], &r[3]); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// dbObjects lists every schema object (type and name) in the database.
+func dbObjects(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rows, err := db.Query("SELECT type || ':' || name FROM sqlite_master ORDER BY type, name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func tableExists(t *testing.T, db *sql.DB, name string) bool {
