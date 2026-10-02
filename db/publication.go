@@ -598,12 +598,14 @@ func acceptedFolderPathsTx(ctx context.Context, tx *sql.Tx) (paths []string, err
 }
 
 // acceptedFileIntegrityTx maps each accepted file of folderPath to its member integrity
-// identity, within tx.
+// identity, within tx. A row a seed inserted after the last clean transition has not been
+// accepted and is excluded.
 func acceptedFileIntegrityTx(ctx context.Context, tx *sql.Tx, folderPath string) (map[string]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT f.name, f.size, e.epoch
 		FROM files f JOIN folders fo ON f.folder_id = fo.id
 		LEFT JOIN file_accepted_epoch e ON e.folder_id = f.folder_id AND e.name = f.name
-		WHERE fo.path = ?`, folderPath)
+		WHERE fo.path = ?
+		AND NOT EXISTS (SELECT 1 FROM file_unaccepted_seed s WHERE s.folder_id = f.folder_id AND s.name = f.name)`, folderPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query accepted files for %s: %w", folderPath, err)
 	}

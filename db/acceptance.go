@@ -673,6 +673,11 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 	if err := setProvenanceTx(ctx, tx, provenanceAccepted); err != nil {
 		return err
 	}
+	// TDI-I3M: seeded rows cross the acceptance boundary here, atomically with the clean
+	// transition that follows a projection rebuilt from those DB rows.
+	if err := acceptSeededRowsTx(ctx, tx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit clean transition: %w", err)
 	}

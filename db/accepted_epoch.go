@@ -24,8 +24,17 @@ import (
 
 const metaKeyFileEpochSeq = "file_accepted_epoch_seq"
 
-// ensureAcceptedEpochTable creates file_accepted_epoch if absent. Idempotent, like the other
-// side tables, so an existing DB needs no migration step and the files table is unchanged.
+// Acceptance boundary for seeded rows. A seed (StoreFilesFolderInfo) writes inventory rows
+// without an acceptance transition; on an already-accepted DB a re-seed can add a new file to
+// an established folder while the snapshot stays clean. Such a row has not crossed the
+// acceptance boundary, so every row a seed inserts is marked in file_unaccepted_seed in the
+// same transaction. The marker is cleared only by the canonical clean transition
+// (commitClean), which promotes exactly the DB rows the accepted projection was rebuilt from,
+// and a publication manifest never includes a marked row.
+
+// ensureAcceptedEpochTable creates file_accepted_epoch and file_unaccepted_seed if absent.
+// Idempotent, like the other side tables, so an existing DB needs no migration step and the
+// files table is unchanged.
 func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
 	const create = `CREATE TABLE IF NOT EXISTS file_accepted_epoch (
 		folder_id INTEGER NOT NULL,
@@ -35,6 +44,26 @@ func ensureAcceptedEpochTable(ctx context.Context, e sqlDBTX) error {
 	);`
 	if _, err := e.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("failed to ensure file_accepted_epoch table: %w", err)
+	}
+	const createUnaccepted = `CREATE TABLE IF NOT EXISTS file_unaccepted_seed (
+		folder_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		PRIMARY KEY (folder_id, name)
+	);`
+	if _, err := e.ExecContext(ctx, createUnaccepted); err != nil {
+		return fmt.Errorf("failed to ensure file_unaccepted_seed table: %w", err)
+	}
+	return nil
+}
+
+// acceptSeededRowsTx clears every unaccepted-seed marker. Called only from the canonical clean
+// transition, inside its transaction.
+func acceptSeededRowsTx(ctx context.Context, e sqlDBTX) error {
+	if err := ensureAcceptedEpochTable(ctx, e); err != nil {
+		return err
+	}
+	if _, err := e.ExecContext(ctx, "DELETE FROM file_unaccepted_seed"); err != nil {
+		return fmt.Errorf("failed to accept seeded rows: %w", err)
 	}
 	return nil
 }
@@ -73,8 +102,9 @@ func recordChangeEpochTx(ctx context.Context, e sqlDBTX, fc FileChange) error {
 	}
 }
 
-// recordSeedEpochsTx stamps the rows a seed actually inserted. Re-seeding over an existing
-// inventory must not re-stamp rows that were already accepted.
+// recordSeedEpochsTx stamps the rows a seed actually inserted and marks them unaccepted until
+// the next clean transition. Re-seeding over an existing inventory must not re-stamp or
+// un-accept rows that were already accepted.
 func recordSeedEpochsTx(ctx context.Context, e sqlDBTX, folderID int64, files []File) error {
 	if err := ensureAcceptedEpochTable(ctx, e); err != nil {
 		return err
@@ -82,6 +112,9 @@ func recordSeedEpochsTx(ctx context.Context, e sqlDBTX, folderID int64, files []
 	for _, f := range files {
 		if err := stampAcceptedEpochTx(ctx, e, folderID, f.Name); err != nil {
 			return err
+		}
+		if _, err := e.ExecContext(ctx, "INSERT OR IGNORE INTO file_unaccepted_seed (folder_id, name) VALUES (?, ?)", folderID, f.Name); err != nil {
+			return fmt.Errorf("failed to mark seeded row %s unaccepted: %w", f.Name, err)
 		}
 	}
 	return nil

@@ -479,6 +479,76 @@ func TestI3M_SameLengthChangeDistinctManifest(t *testing.T) {
 	}
 }
 
+// manifestHasFile reports whether any member of the accepted manifest is fileName.
+func manifestHasFile(t *testing.T, db *sql.DB, root, fileName string) bool {
+	t.Helper()
+	m, err := BuildAcceptedPublicationManifest(context.Background(), db, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range m.Folders {
+		for _, s := range f.Subjects {
+			for _, mem := range s.Members {
+				if mem.FileName == fileName {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// Codex P1 (acceptance boundary): re-running the seed over a clean accepted DB inserts a new
+// file of an established folder without an acceptance transition. That row must not enter a
+// publication manifest until the canonical clean transition accepts it.
+func TestI3M_ReseededRowIneligibleUntilAccepted(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	dir := writeRuleFolder(t, root, "runA", pairFiles("A")...)
+	db := newAcceptanceDB(t)
+	acceptBaseline(t, db, root)
+	before := mustManifestID(t, db, root)
+
+	seeded := pairFiles("C")
+	for _, f := range seeded {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := StoreFilesFolderInfo(ctx, db, dir, acceptanceExclusions); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	if got := mustManifestID(t, db, root); got != before {
+		t.Fatalf("re-seed changed the accepted ManifestID: %s vs %s", got, before)
+	}
+	if manifestHasFile(t, db, root, seeded[0]) {
+		t.Fatalf("re-seeded %s entered the manifest without an acceptance transition", seeded[0])
+	}
+
+	// An unchanged re-scan is not an acceptance transition: still ineligible.
+	res, err := SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeUnchanged {
+		t.Fatalf("re-scan: expected unchanged, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	if got := mustManifestID(t, db, root); got != before {
+		t.Fatalf("unchanged re-scan changed the accepted ManifestID: %s vs %s", got, before)
+	}
+
+	// The next canonical acceptance promotes the re-seeded rows with the rebuilt projection.
+	if err := os.WriteFile(filepath.Join(dir, pairFiles("A")[0]), []byte("zz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err = SyncFolders(ctx, db, root, nil, acceptanceExclusions)
+	if err != nil || res.Outcome != OutcomeAcceptedUpdate {
+		t.Fatalf("accept: expected accepted-update, got %v (%s) err=%v", res.Outcome, res.Reason, err)
+	}
+	for _, f := range seeded {
+		if !manifestHasFile(t, db, root, f) {
+			t.Fatalf("%s not eligible after the canonical acceptance", f)
+		}
+	}
+}
+
 // Codex P1 (snapshot): a SyncFolders commit racing the manifest build cannot produce a hybrid
 // of version-N bases and a version-N+1 inventory. The build sees exactly version N.
 func TestI3M_ConcurrentSyncNoHybridManifest(t *testing.T) {
