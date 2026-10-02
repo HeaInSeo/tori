@@ -411,6 +411,43 @@ func TestI3M_ManifestIsRootRelative(t *testing.T) {
 	}
 }
 
+// Folder paths are bound to the access root recorded for the accepted snapshot: an
+// ancestor (or any other) caller root is refused instead of minting a second ManifestID
+// for the same accepted data, and an equivalent spelling of the recorded root still
+// yields the same ManifestID. Refusals publish nothing.
+func TestI3M_ManifestBoundToRecordedRoot(t *testing.T) {
+	ctx := context.Background()
+	parent := t.TempDir()
+	root := filepath.Join(parent, "source")
+	db := newAcceptanceDB(t)
+	writeRuleFolder(t, root, "runA", i3mFilesAB...)
+	acceptBaseline(t, db, root)
+	want := mustManifestID(t, db, root)
+	tables := []string{"publication_manifests", "publication_generations", "publication_generation_subjects", "publication_operations"}
+	for name, other := range map[string]string{"ancestor": parent, "sibling": t.TempDir(), "child": filepath.Join(root, "runA")} {
+		if m, err := BuildAcceptedPublicationManifest(ctx, db, other); !errors.Is(err, ErrPublicationNotAccepted) {
+			t.Fatalf("%s root %s: manifest %+v err = %v, want ErrPublicationNotAccepted", name, other, m.Folders, err)
+		}
+	}
+	for _, table := range tables {
+		if tableExists(t, db, table) {
+			t.Fatalf("refused manifest builds created %s", table)
+		}
+	}
+	if got := mustManifestID(t, db, root+string(filepath.Separator)+"."+string(filepath.Separator)); got != want {
+		t.Fatalf("equivalent spelling of the recorded root changed ManifestID %s -> %s", want, got)
+	}
+}
+
+func tableExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&n); err != nil {
+		t.Fatalf("lookup table %s: %v", name, err)
+	}
+	return n == 1
+}
+
 func mustManifestID(t *testing.T, db *sql.DB, root string) string {
 	t.Helper()
 	m, err := BuildAcceptedPublicationManifest(context.Background(), db, root)

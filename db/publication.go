@@ -476,9 +476,11 @@ func GetGeneration(ctx context.Context, db *sql.DB, generationID string) (Genera
 // BuildAcceptedPublicationManifest freezes the current CLEAN accepted snapshot into a
 // semantic manifest. It reads only accepted state: the source basis and classification
 // basis pinned at accepted_version and the accepted inventory rows. It never reads the
-// on-disk rule.json or datablock.pb. rootPath is the root the snapshot was accepted
-// under; folder paths are recorded relative to it. Conflicted (I12) subjects are not
-// published.
+// on-disk rule.json or datablock.pb. rootPath must be the access root recorded for the
+// endpoint the accepted source basis pins (compared after filepath.Clean); any other path,
+// including an ancestor of that root, is refused, so one accepted snapshot has exactly one
+// set of root-relative folder paths and therefore one ManifestID. Conflicted (I12)
+// subjects are not published.
 //
 // Integrity: the local POSIX profile records no content digest, so a member's integrity
 // identity is "size:<bytes>" plus the row's accepted change epoch (accepted_epoch.go). A
@@ -525,6 +527,14 @@ func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPat
 	if !ok {
 		return PublicationSemanticManifest{}, fmt.Errorf("%w: no source basis pinned at v%d", ErrPublicationNotAccepted, acceptedVer)
 	}
+	acceptedRoot, err := recordedEndpointRoot(ctx, tx, src)
+	if err != nil {
+		return PublicationSemanticManifest{}, err
+	}
+	if filepath.Clean(rootPath) != acceptedRoot {
+		return PublicationSemanticManifest{}, fmt.Errorf("%w: root %s is not the access root %s recorded for the snapshot accepted at v%d",
+			ErrPublicationNotAccepted, rootPath, acceptedRoot, acceptedVer)
+	}
 	if err := ensureAcceptedEpochTable(ctx, tx); err != nil {
 		return PublicationSemanticManifest{}, err
 	}
@@ -555,10 +565,10 @@ func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPat
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		rel, err := filepath.Rel(rootPath, folderPath)
-		if err != nil || !pathWithinRoot(folderPath, rootPath) {
+		rel, err := filepath.Rel(acceptedRoot, folderPath)
+		if err != nil || !pathWithinRoot(folderPath, acceptedRoot) {
 			return PublicationSemanticManifest{}, fmt.Errorf("%w: accepted folder %s is outside root %s",
-				ErrPublicationNotAccepted, folderPath, rootPath)
+				ErrPublicationNotAccepted, folderPath, acceptedRoot)
 		}
 		subjects, _ := rules.PublicationSubjects(names, ruleSet)
 		mf := ManifestFolder{Path: filepath.ToSlash(rel), ClassificationRevisionID: basis.RevisionID}
@@ -577,6 +587,26 @@ func buildAcceptedPublicationManifestTx(ctx context.Context, tx *sql.Tx, rootPat
 		m.Folders = append(m.Folders, mf)
 	}
 	return m, nil
+}
+
+// recordedEndpointRoot returns the cleaned access root of the endpoint that src pins. A
+// basis whose endpoint row is missing or unreadable is refused rather than trusted.
+func recordedEndpointRoot(ctx context.Context, e sqlDBTX, src SnapshotSourceBasis) (string, error) {
+	var canonical string
+	err := e.QueryRowContext(ctx,
+		"SELECT canonical FROM source_endpoints WHERE source_id = ? AND endpoint_id = ?",
+		src.SourceID, src.EndpointID).Scan(&canonical)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: pinned access endpoint %s is not recorded", ErrPublicationNotAccepted, shortRev(src.EndpointID))
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to read pinned access endpoint %s: %w", shortRev(src.EndpointID), err)
+	}
+	var ep SourceAccessEndpoint
+	if err := json.Unmarshal([]byte(canonical), &ep); err != nil || ep.RootDir == "" {
+		return "", fmt.Errorf("%w: pinned access endpoint %s has no readable root", ErrPublicationNotAccepted, shortRev(src.EndpointID))
+	}
+	return filepath.Clean(ep.RootDir), nil
 }
 
 // publicationSnapshotHookForTest runs inside the snapshot read, after accepted_version is
