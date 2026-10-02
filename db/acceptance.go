@@ -648,8 +648,9 @@ func beginPendingWithBases(ctx context.Context, db *sql.DB, targetBasis []folder
 // transaction so promotion of the target basis to the accepted basis (accepted_version
 // = target) is atomic with the clean transition (TDI-I4F §6): "accepted basis" is
 // exactly the classification_semantics rows under accepted_version, so flipping the
-// pointer promotes the whole target basis at once.
-func commitClean(ctx context.Context, db *sql.DB, target int64) error {
+// pointer promotes the whole target basis at once. frontier is the seed-marker set captured
+// before the projection rebuild this transition follows (see captureSeedFrontier).
+func commitClean(ctx context.Context, db *sql.DB, target int64, frontier seedFrontier) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin commit-clean tx: %w", err)
@@ -660,6 +661,10 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 			_ = tx.Rollback()
 		}
 	}()
+	prevAccepted, err := metaGetInt(ctx, tx, metaKeyAcceptedVersion)
+	if err != nil {
+		return err
+	}
 	if err := metaSet(ctx, tx, metaKeyAcceptedVersion, strconv.FormatInt(target, 10)); err != nil {
 		return err
 	}
@@ -672,6 +677,18 @@ func commitClean(ctx context.Context, db *sql.DB, target int64) error {
 	// on later clean transitions.
 	if err := setProvenanceTx(ctx, tx, provenanceAccepted); err != nil {
 		return err
+	}
+	// TDI-I3M: seeded rows cross the acceptance boundary here, atomically with the clean
+	// transition that follows a projection rebuilt from those DB rows. Only a transition that
+	// advances accepted_version is an acceptance: the missing-projection / drift / evidence
+	// restore paths re-commit clean at target == accepted ("no version bump"), and must not
+	// admit post-boundary rows into the already-accepted version. Only the frontier captured
+	// before the rebuild is promoted; a seed committed after that stays marked for a later
+	// acceptance.
+	if target > prevAccepted {
+		if err := acceptSeededRowsTx(ctx, tx, frontier); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit clean transition: %w", err)
@@ -738,6 +755,12 @@ func publishAcceptedProjection(ctx context.Context, db *sql.DB, rootPath string,
 	if beforePublishForTest != nil {
 		beforePublishForTest()
 	}
+	// TDI-I3M: the seed markers present now are exactly those whose rows the rebuild below
+	// reads; only they may be promoted by the clean transition.
+	frontier, err := captureSeedFrontier(ctx, db)
+	if err != nil {
+		return false, err
+	}
 	// (2)+(3) rebuild+publish from the frozen basis; keep the completeness signal.
 	complete, err = regenerateProjectionFromDB(ctx, db, rootPath, inScope)
 	if err != nil {
@@ -774,7 +797,7 @@ func publishAcceptedProjection(ctx context.Context, db *sql.DB, rootPath string,
 	if err := carrySourceBasisForward(ctx, db, target, accepted); err != nil {
 		return false, err
 	}
-	if err := commitClean(ctx, db, target); err != nil {
+	if err := commitClean(ctx, db, target, frontier); err != nil {
 		return false, err
 	}
 	return true, nil
